@@ -1,0 +1,313 @@
+/* Shared by the window and the parameters inspector. Editor color variables keep it working in both themes. */
+
+.ce-root {
+    flex-grow: 1;
+    padding: 10px;
+    font-size: 12px;
+}
+
+.ce-header {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.ce-title {
+    font-size: 16px;
+    -unity-font-style: bold;
+}
+
+.ce-version {
+    margin-left: 6px;
+    opacity: 0.6;
+}
+
+.ce-spacer {
+    flex-grow: 1;
+}
+
+.ce-pill {
+    padding: 2px 8px;
+    margin-left: 10px;
+    border-radius: 9px;
+    -unity-font-style: bold;
+}
+
+.ce-pill--ok {
+    background-color: rgba(46, 160, 110, 0.28);
+}
+
+.ce-pill--warn {
+    background-color: rgba(214, 158, 46, 0.32);
+}
+
+.ce-pill--error {
+    background-color: rgba(214, 69, 65, 0.36);
+}
+
+.ce-card {
+    padding: 10px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: var(--unity-colors-default-border);
+    background-color: var(--unity-colors-helpbox-background);
+    flex-shrink: 0;
+}
+
+.ce-bar-label {
+    flex-direction: row;
+    margin-bottom: 4px;
+}
+
+.ce-bar-text {
+    -unity-font-style: bold;
+}
+
+.ce-muted {
+    opacity: 0.7;
+}
+
+.ce-bar-track {
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+    background-color: rgba(127, 127, 127, 0.25);
+    margin-bottom: 8px;
+}
+
+.ce-bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    background-color: rgb(46, 160, 110);
+}
+
+.ce-bar-fill--over {
+    background-color: rgb(214, 69, 65);
+}
+
+.ce-stats {
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.ce-stat {
+    margin-right: 24px;
+    min-width: 88px;
+}
+
+.ce-stat-value {
+    font-size: 15px;
+    -unity-font-style: bold;
+}
+
+.ce-banner {
+    margin-top: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    white-space: normal;
+}
+
+.ce-banner--info {
+    background-color: rgba(64, 132, 214, 0.22);
+}
+
+.ce-banner--warn {
+    background-color: rgba(214, 158, 46, 0.26);
+}
+
+.ce-banner--error {
+    background-color: rgba(214, 69, 65, 0.3);
+}
+
+.ce-rules {
+    flex-shrink: 0;
+    margin-bottom: 8px;
+}
+
+.ce-rule-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.ce-rule-label {
+    width: 132px;
+    -unity-font-style: bold;
+}
+
+.ce-rule-row Toggle {
+    margin-right: 14px;
+}
+
+.ce-pattern {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 3px;
+}
+
+.ce-pattern TextField {
+    flex-grow: 1;
+    margin-left: 0;
+}
+
+.ce-pattern-count {
+    width: 110px;
+    -unity-text-align: middle-right;
+    margin-right: 6px;
+}
+
+.ce-pattern-count--empty {
+    color: rgb(222, 150, 40);
+    -unity-font-style: bold;
+}
+
+.ce-table-toolbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+}
+
+.ce-search {
+    flex-grow: 1;
+    flex-basis: 160px;
+    width: auto;
+    margin-right: 6px;
+}
+
+.ce-seg-group {
+    flex-direction: row;
+}
+
+.ce-seg {
+    margin: 0;
+    padding: 2px 8px;
+    border-radius: 3px;
+}
+
+.ce-seg--on {
+    background-color: rgba(64, 132, 214, 0.55);
+    -unity-font-style: bold;
+}
+
+.ce-bulk {
+    flex-direction: row;
+    align-items: center;
+    padding: 4px 6px;
+    margin-bottom: 4px;
+    border-radius: 4px;
+    background-color: rgba(64, 132, 214, 0.16);
+    flex-shrink: 0;
+}
+
+.ce-bulk Label {
+    margin-right: 8px;
+}
+
+.ce-table-header {
+    flex-direction: row;
+    padding: 3px 6px;
+    border-bottom-width: 1px;
+    border-color: var(--unity-colors-default-border);
+    -unity-font-style: bold;
+    flex-shrink: 0;
+}
+
+.ce-table {
+    flex-grow: 1;
+    min-height: 140px;
+}
+
+.ce-row {
+    flex-direction: row;
+    align-items: center;
+    height: 100%;
+    padding: 0 6px;
+}
+
+.ce-col-name {
+    flex-grow: 1;
+    flex-basis: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ce-col-type {
+    width: 46px;
+}
+
+.ce-col-control {
+    width: 82px;
+}
+
+.ce-col-bits {
+    width: 34px;
+}
+
+.ce-col-status {
+    flex-grow: 1;
+    flex-basis: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ce-col-choice {
+    width: 196px;
+}
+
+.ce-status--compressed {
+    color: rgb(222, 150, 40);
+}
+
+.ce-status--protected {
+    color: rgb(46, 170, 120);
+}
+
+.ce-status--direct,
+.ce-status--unavailable {
+    opacity: 0.65;
+}
+
+.ce-row .ce-seg {
+    font-size: 11px;
+    padding: 1px 6px;
+}
+
+.ce-empty {
+    padding: 24px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+/* Parameters inspector */
+
+.ce-inspector-header {
+    width: 84px;
+    flex-shrink: 0;
+}
+
+.ce-inspector-button {
+    width: 78px;
+    height: 18px;
+    margin: 0 0 0 2px;
+    padding: 0 2px;
+    border-left-width: 3px;
+    flex-shrink: 0;
+    font-size: 11px;
+}
+
+.ce-chip--protected {
+    border-left-color: rgb(46, 170, 120);
+}
+
+.ce-chip--open {
+    border-left-color: rgb(222, 150, 40);
+}
+
+.ce-chip--off {
+    border-left-color: rgba(127, 127, 127, 0.4);
+}

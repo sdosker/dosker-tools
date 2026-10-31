@@ -1,0 +1,64 @@
+name: Release packages
+
+# A single workflow on purpose: releases created with GITHUB_TOKEN don't trigger other workflows
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Packages/com.dosker.*/**"
+      - "scripts/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build packages
+        run: python3 scripts/build_packages.py --out dist --repo "$GITHUB_REPOSITORY"
+
+      - name: Release new versions
+        run: |
+          for manifest in dist/*.json; do
+            base="$(basename "$manifest" .json)"
+            name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$manifest")"
+            version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$manifest")"
+            tag="$name-v$version"
+            if gh release view "$tag" > /dev/null 2>&1; then
+              echo "$tag already released"
+              continue
+            fi
+            gh release create "$tag" "dist/$base.zip" "$manifest" \
+              --title "$name $version" \
+              --notes-file "Packages/$name/CHANGELOG.md" \
+              --target "$GITHUB_SHA"
+          done
+
+      - name: Build listing
+        run: python3 scripts/build_listing.py --repo "$GITHUB_REPOSITORY" --out site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

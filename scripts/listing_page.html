@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__LISTING_NAME__</title>
+<meta name="description" content="Ferramentas de Editor para criadores de VRChat, instaláveis pelo VRChat Creator Companion.">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --text: #1a1d23;
+  --muted: #5b6472;
+  --border: #dfe2e8;
+  --accent: #3b5bdb;
+  --accent-hover: #2f4ac0;
+  --on-accent: #ffffff;
+  --tag-bg: #e9edfb;
+  --tag-text: #2f4ac0;
+  --notice-bg: #fff8e6;
+  --notice-border: #e8b93a;
+  --notice-text: #4a3500;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --text: #e8eaf0;
+    --muted: #98a1b3;
+    --border: #2a2f3a;
+    --accent: #7c96ff;
+    --accent-hover: #98adff;
+    --on-accent: #0b0e14;
+    --tag-bg: #232a40;
+    --tag-text: #aebdff;
+    --notice-bg: #2a2208;
+    --notice-border: #8a6d1a;
+    --notice-text: #f5dfa0;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.55 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+a { color: var(--accent); }
+a:hover { color: var(--accent-hover); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.875em; }
+.wrap { max-width: 820px; margin: 0 auto; padding: 0 16px; }
+
+.top { border-bottom: 1px solid var(--border); background: var(--surface); }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.brand { font-weight: 600; }
+.top a { color: var(--muted); text-decoration: none; font-size: 0.9375rem; }
+.top a:hover { color: var(--text); }
+
+.intro { padding: 40px 0 24px; }
+h1 { margin: 0 0 8px; font-size: 2rem; line-height: 1.2; letter-spacing: -0.01em; }
+.lead { margin: 0 0 24px; color: var(--muted); font-size: 1.0625rem; }
+.add { display: flex; gap: 8px; flex-wrap: wrap; }
+.url {
+  display: flex;
+  flex: 1 1 320px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.url input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px 0 0 6px;
+  background: none;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.8125rem;
+}
+.url button {
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0 6px 6px 0;
+  padding: 0 14px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.url button:hover { color: var(--accent); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); color: var(--on-accent); }
+
+.notice {
+  margin: 0 0 32px;
+  padding: 14px 16px;
+  border: 1px solid var(--notice-border);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: var(--notice-bg);
+  color: var(--notice-text);
+  font-size: 0.9375rem;
+}
+.notice strong { display: block; }
+
+h2 { margin: 0 0 12px; font-size: 1.125rem; }
+.packages { display: grid; gap: 12px; margin-bottom: 40px; }
+.pkg { padding: 16px 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.pkg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pkg h3 { margin: 0; font-size: 1.0625rem; }
+.version { color: var(--muted); }
+.tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--tag-bg);
+  color: var(--tag-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.pkg-id { display: block; margin-top: 2px; color: var(--muted); overflow-wrap: anywhere; }
+.pkg p { margin: 8px 0 12px; }
+.pkg-actions { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+.pkg-actions .btn { min-height: 34px; padding: 0 12px; font-size: 0.8125rem; }
+.pkg-actions > a:not(.btn) { font-size: 0.875rem; }
+details { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; font-size: 0.875rem; }
+summary { color: var(--muted); cursor: pointer; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 4px; }
+dt { color: var(--muted); }
+dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+.steps { margin: 0 0 40px; padding-left: 20px; }
+.steps li { margin-bottom: 4px; }
+footer { padding: 20px 0 32px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; }
+
+@media (max-width: 480px) {
+  h1 { font-size: 1.625rem; }
+  .intro { padding-top: 28px; }
+  .add .btn { flex: 1 1 100%; justify-content: center; }
+  .url { flex-basis: 100%; min-height: 40px; }
+  .pkg { padding: 14px 16px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <span class="brand">__LISTING_NAME__</span>
+    <a href="https://github.com/__REPO__">GitHub</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="intro">
+    <h1>__LISTING_NAME__</h1>
+    <p class="lead">Ferramentas de Editor para criadores de VRChat, instaláveis pelo Creator Companion.</p>
+    <div class="add">
+      <a class="btn primary" href="__ADD_URL__">Add to VCC</a>
+      <div class="url">
+        <input id="listing-url" value="__LISTING_URL__" readonly aria-label="Endereço do listing">
+        <button id="copy" type="button">Copiar</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="notice">
+    <strong>⚠️ Aviso: IA</strong>
+    Todas as ferramentas disponibilizadas aqui fizeram uso de IA na sua criação. O código, os scripts e a
+    documentação foram escritos com auxílio de inteligência artificial, sob revisão humana.
+  </aside>
+
+  <section aria-labelledby="packages-title">
+    <h2 id="packages-title">Pacotes</h2>
+    <div class="packages">
+__PACKAGES__
+    </div>
+  </section>
+
+  <section aria-labelledby="steps-title">
+    <h2 id="steps-title">Como instalar</h2>
+    <ol class="steps">
+      <li>Clique em <strong>Add to VCC</strong> e confirme no Creator Companion.</li>
+      <li>Se preferir, copie o endereço e adicione em <strong>Settings &gt; Packages &gt; Add Repository</strong>.</li>
+      <li>Abra <strong>Manage Project</strong> e adicione os pacotes desejados. As dependências entram junto.</li>
+      <li>No Unity, as janelas ficam em <strong>Tools &gt; Dosker Tools</strong>.</li>
+    </ol>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">Publicado por __AUTHOR__ · <a href="https://github.com/__REPO__">Código no GitHub</a></div>
+</footer>
+
+<script>
+document.getElementById("copy").addEventListener("click", async event => {
+  const input = document.getElementById("listing-url");
+  const button = event.currentTarget;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    button.textContent = "Copiado";
+  } catch {
+    input.select();
+    button.textContent = "Ctrl+C";
+  }
+  setTimeout(() => { button.textContent = "Copiar"; }, 2000);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+    "name": "CompressorExclusions.Editor",
+    "rootNamespace": "CompressorExclusions",
+    "references": [
+        "VRC.SDKBase.Editor.BuildPipeline"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "DOSKER_HAS_VRC_AVATARS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.avatars",
+            "expression": "3.0.0",
+            "define": "DOSKER_HAS_VRC_AVATARS"
+        }
+    ],
+    "noEngineReferences": false
+}

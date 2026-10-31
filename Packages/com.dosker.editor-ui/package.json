@@ -1,0 +1,19 @@
+{
+  "name": "com.dosker.editor-ui",
+  "displayName": "Dosker Tools - Editor UI",
+  "version": "0.6.2",
+  "unity": "2022.3",
+  "description": "Componentes de interface compartilhados pelas janelas do Dosker Tools.",
+  "author": {
+    "name": "Dosker",
+    "email": "6579456+sdosker@users.noreply.github.com",
+    "url": "https://github.com/sdosker"
+  },
+  "license": "MIT",
+  "vpmDependencies": {
+    "com.vrchat.base": ">=3.7.0"
+  },
+  "legacyFiles": {
+    "Assets\\Editor\\ShaderViewEditorUi.cs": ""
+  }
+}

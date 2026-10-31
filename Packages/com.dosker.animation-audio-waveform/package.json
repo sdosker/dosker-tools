@@ -1,0 +1,19 @@
+{
+  "name": "com.dosker.animation-audio-waveform",
+  "displayName": "Dosker Tools - Animation Audio Waveform",
+  "version": "0.6.2",
+  "unity": "2022.3",
+  "description": "Mostra o áudio dentro da janela Animation para sincronizar animações com som.",
+  "author": {
+    "name": "Dosker",
+    "email": "6579456+sdosker@users.noreply.github.com",
+    "url": "https://github.com/sdosker"
+  },
+  "license": "MIT",
+  "vpmDependencies": {
+    "com.vrchat.base": ">=3.7.0"
+  },
+  "legacyFiles": {
+    "Assets\\Editor\\AnimationAudioWaveformWindow.cs": ""
+  }
+}
