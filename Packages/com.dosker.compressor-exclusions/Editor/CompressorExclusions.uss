@@ -23,6 +23,25 @@
     opacity: 0.6;
 }
 
+.ce-forecast-row {
+    flex-direction: row;
+}
+
+.ce-forecast-cell {
+    flex-grow: 1;
+    flex-basis: 0;
+    padding: 1px 4px;
+}
+
+.ce-forecast-head {
+    -unity-font-style: bold;
+}
+
+.ce-forecast-status {
+    margin-top: 4px;
+    white-space: normal;
+}
+
 .ce-spacer {
     flex-grow: 1;
 }

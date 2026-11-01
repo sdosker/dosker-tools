@@ -23,6 +23,8 @@ namespace CompressorExclusions {
         private const string SolverMethodName = "GetParamsToOptimize";
         private const string MenuMethodName = "GetParamsUsedInMenu";
         private const string LogPrefix = "[Compressor Exclusions]";
+        // Same version as scripts/vrcfury_compat.json
+        private const string TestedVrcfury = "1.1436.0";
 
         private static readonly ControlType[] MenuControls = {
             ControlType.RadialPuppet,
@@ -39,11 +41,24 @@ namespace CompressorExclusions {
         public static string ReportingError { get; private set; }
         public static string VrcfuryVersion { get; private set; } = "?";
 
+        public static bool IsNewerThanTested {
+            get {
+                if (!Version.TryParse(VrcfuryVersion.Split('-')[0], out var current)) return false;
+                return current > Version.Parse(TestedVrcfury);
+            }
+        }
+
+        private static readonly MethodInfo BitWidthMethod =
+            AccessTools.Method(typeof(VRCExpressionParameters.Parameter), "GetBitWidthByType", Type.EmptyTypes);
+        private static readonly FieldInfo FlippedField =
+            AccessTools.Field(typeof(VRCExpressionParameters.Parameter), "flippedRepresentation");
+
         private static MethodInfo menuMethod;
         private static VRCExpressionParameters filteredParams;
         private static object currentSolver;
         private static Snapshot currentSnapshot;
         private static Dictionary<string, int> currentControls = new Dictionary<string, int>();
+        private static Dictionary<string, string> currentMenuPaths = new Dictionary<string, string>();
 
         static CompressorExclusionPatch() {
             try {
@@ -71,6 +86,8 @@ namespace CompressorExclusions {
                 throw new Exception($"Método {SolverMethodName}(VRCExpressionParameters, ...) não encontrado.");
             }
 
+            CheckSolverShape(innerMethod);
+
             var harmony = new Harmony("compressor-exclusions");
             harmony.Patch(innerMethod, prefix: new HarmonyMethod(Method(nameof(SolverPrefix))));
 
@@ -85,11 +102,35 @@ namespace CompressorExclusions {
             try {
                 var outerMethod = solverType.GetMethod(SolverMethodName, Type.EmptyTypes);
                 if (outerMethod == null) throw new Exception($"Método {SolverMethodName}() não encontrado.");
+                CheckResultShape(outerMethod.ReturnType);
                 harmony.Patch(outerMethod, postfix: new HarmonyMethod(Method(nameof(SolverResultPostfix))));
             } catch (Exception e) {
                 ReportingError = $"O resultado real do build não será mostrado: {e.Message}";
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             }
+        }
+
+        /**
+         * The checklist for VRCFury updates, done at load. Without paramz the protections can't work, so this fails
+         * before patching and the build check warns about it.
+         */
+        private static void CheckSolverShape(MethodInfo innerMethod) {
+            var names = innerMethod.GetParameters().Select(parameter => parameter.Name).ToList();
+            var missing = new[] { "paramz", "addDriven", "originalCost" }.Where(name => !names.Contains(name)).ToList();
+            if (missing.Count > 0) {
+                throw new Exception($"O método {SolverMethodName} não tem mais: {string.Join(", ", missing)}.");
+            }
+        }
+
+        private static void CheckResultShape(Type outputType) {
+            var decisionType = AccessTools.Field(outputType, "decision")?.FieldType;
+            if (decisionType == null) throw new Exception("O resultado do solver não tem mais o campo decision.");
+
+            var missing = new[] { "compress", "numberSlots", "boolSlots" }
+                .Where(name => AccessTools.Field(decisionType, name) == null)
+                .Concat(new[] { "GetBatchCount", "GetFinalCost" }.Where(name => AccessTools.Method(decisionType, name) == null))
+                .ToList();
+            if (missing.Count > 0) throw new Exception($"O resultado do solver não tem mais: {string.Join(", ", missing)}.");
         }
 
         private static MethodInfo Method(string name) {
@@ -108,6 +149,7 @@ namespace CompressorExclusions {
             if (!ReferenceEquals(__instance, currentSolver)) {
                 currentSolver = __instance;
                 currentControls = ReadMenuControls(__instance);
+                currentMenuPaths = ReadMenuPaths(__instance);
                 Report(__instance, settings, paramz, addDriven, originalCost);
             }
 
@@ -118,13 +160,33 @@ namespace CompressorExclusions {
                 filteredParams.hideFlags = HideFlags.HideAndDontSave;
             }
             filteredParams.parameters = paramz.parameters
-                .Where(p => !CompressorPolicy.Evaluate(settings, p.name, p.valueType, ControlOf(p.name)).isProtected)
+                .Where(p => !CompressorPolicy.Evaluate(settings, p.name, p.valueType, ControlOf(p.name), MenuPathOf(p.name)).isProtected)
                 .ToArray();
             paramz = filteredParams;
         }
 
         private static int ControlOf(string paramName) {
             return currentControls.TryGetValue(paramName, out var control) ? control : CompressorPolicy.NoControl;
+        }
+
+        private static string MenuPathOf(string paramName) {
+            return currentMenuPaths.TryGetValue(paramName, out var path) ? path : "";
+        }
+
+        private static Dictionary<string, string> ReadMenuPaths(object solver) {
+            var output = new Dictionary<string, string>();
+            try {
+                var menu = Traverse.Create(solver).Property("menuReadOnly").GetValue<VRCExpressionsMenu>();
+                CompressorPolicy.WalkMenu(menu, (control, path) => {
+                    foreach (var param in new[] { control.parameter }.Concat(control.subParameters ?? new VRCExpressionsMenu.Control.Parameter[0])) {
+                        if (!string.IsNullOrEmpty(param?.name) && !output.ContainsKey(param.name)) output[param.name] = path;
+                    }
+                });
+            } catch (Exception e) {
+                ReportingError = $"Não foi possível ler os caminhos do menu: os padrões menu: não funcionam. {e.Message}";
+                Debug.LogWarning($"{LogPrefix} {ReportingError}");
+            }
+            return output;
         }
 
         private static Dictionary<string, int> ReadMenuControls(object solver) {
@@ -157,12 +219,8 @@ namespace CompressorExclusions {
                 var snapshot = NewSnapshot(solver, settings);
                 snapshot.needsCompression = true;
                 snapshot.originalCost = originalCost;
-                snapshot.parameters = synced.Select(p => new SnapshotParam {
-                    name = p.name,
-                    valueType = (int)p.valueType,
-                    control = ControlOf(p.name),
-                    addDriven = addDriven.Contains(p.name)
-                }).ToList();
+                snapshot.parameters = synced.Select(p => ToSnapshotParam(p, addDriven)).ToList();
+                AddPredictions(snapshot, settings);
                 // Saved now, because if the avatar doesn't fit then VRCFury throws before the result is available
                 CompressorSnapshotStore.Save(snapshot);
                 currentSnapshot = snapshot;
@@ -170,14 +228,14 @@ namespace CompressorExclusions {
                 if (!settings.active) return;
 
                 var protectedNames = synced
-                    .Where(p => CompressorPolicy.Evaluate(settings, p.name, p.valueType, ControlOf(p.name)).isProtected)
+                    .Where(p => CompressorPolicy.Evaluate(settings, p.name, p.valueType, ControlOf(p.name), MenuPathOf(p.name)).isProtected)
                     .Select(p => p.name)
                     .ToList();
                 Debug.Log($"{LogPrefix} {protectedNames.Count} parameters protected from compression: "
                           + string.Join(", ", protectedNames));
 
                 foreach (var pattern in settings.namePatterns.Where(p => !string.IsNullOrWhiteSpace(p))) {
-                    if (!synced.Any(p => CompressorPolicy.MatchesPattern(pattern, p.name))) {
+                    if (!synced.Any(p => CompressorPolicy.MatchesPattern(pattern, p.name, MenuPathOf(p.name)))) {
                         Debug.LogWarning($"{LogPrefix} The name pattern \"{pattern}\" did not match any synced parameter.");
                     }
                 }
@@ -187,11 +245,67 @@ namespace CompressorExclusions {
             }
         }
 
+        private static void AddPredictions(Snapshot snapshot, CompressorExclusionSettings settings) {
+            var previous = CompressorSnapshotStore.Load(snapshot.Key);
+            if (previous != null && previous.parameters.Count > 0) {
+                snapshot.predictionBefore = CompressorPolicy.Predict(settings, previous.parameters, previous.originalCost, previous.maxCost);
+            }
+            snapshot.predictionAtBuild = CompressorPolicy.Predict(settings, snapshot.parameters, snapshot.originalCost, snapshot.maxCost);
+        }
+
+        private static void WarnIfPlatformsDiffer(Snapshot snapshot) {
+            var other = CompressorSnapshotStore.Counterpart(snapshot);
+            if (other != null && other.settingsFingerprint != snapshot.settingsFingerprint) {
+                Debug.LogWarning($"{LogPrefix} {other.platform} was built with different settings. Upload PC first, then Quest, or they won't sync.");
+            }
+        }
+
+        private static SnapshotParam ToSnapshotParam(VRCExpressionParameters.Parameter param, ISet<string> addDriven) {
+            var isBool = param.valueType == VRCExpressionParameters.ValueType.Bool;
+            // Older SDKs don't have dynamic bit widths. Same rule as VRCFury's HasStandardNetworkEncoding.
+            var cost = isBool ? 1 : BitWidthMethod == null ? 8 : Convert.ToInt32(BitWidthMethod.Invoke(param, null));
+            var flipped = !isBool && FlippedField != null && (bool)FlippedField.GetValue(param);
+            return new SnapshotParam {
+                name = param.name,
+                valueType = (int)param.valueType,
+                control = ControlOf(param.name),
+                menuPath = MenuPathOf(param.name),
+                addDriven = addDriven.Contains(param.name),
+                cost = cost,
+                nonStandardEncoding = !isBool && (cost != 8 || flipped)
+            };
+        }
+
+        private static Snapshot FitsWithoutCompression(object solver) {
+            var snapshot = NewSnapshot(solver, CompressorExclusionSettings.Instance);
+            try {
+                currentControls = ReadMenuControls(solver);
+                currentMenuPaths = ReadMenuPaths(solver);
+                var paramz = Traverse.Create(solver).Field("paramsService").Method("GetReadOnlyParams")
+                    .GetValue<VRCExpressionParameters>();
+                snapshot.originalCost = paramz.CalcTotalCost();
+                snapshot.parameters = paramz.parameters.Where(p => p.networkSynced)
+                    .Select(p => ToSnapshotParam(p, new HashSet<string>()))
+                    .ToList();
+                AddPredictions(snapshot, CompressorExclusionSettings.Instance);
+                snapshot.hasResult = true;
+                snapshot.resultCost = snapshot.originalCost;
+            } catch (Exception e) {
+                // The list is only for display, so the one from the previous build is good enough
+                snapshot.parameters = CompressorSnapshotStore.Load(snapshot.Key)?.parameters ?? snapshot.parameters;
+                ReportingError = $"Não foi possível ler os parâmetros do build: {e.Message}";
+                Debug.LogWarning($"{LogPrefix} {ReportingError}");
+            }
+            return snapshot;
+        }
+
         private static void SolverResultPostfix(object __instance, object __result) {
             try {
                 if (!ReferenceEquals(__instance, currentSolver)) {
                     // The avatar fits without compression, so the solver returned before any attempt
-                    CompressorSnapshotStore.Save(NewSnapshot(__instance, CompressorExclusionSettings.Instance));
+                    var fitting = FitsWithoutCompression(__instance);
+                    CompressorSnapshotStore.Save(fitting, true);
+                    WarnIfPlatformsDiffer(fitting);
                     return;
                 }
 
@@ -211,7 +325,8 @@ namespace CompressorExclusions {
                 snapshot.resultCost = compressed.Count == 0
                     ? snapshot.originalCost
                     : decision.Method("GetFinalCost", snapshot.originalCost).GetValue<int>();
-                CompressorSnapshotStore.Save(snapshot);
+                CompressorSnapshotStore.Save(snapshot, true);
+                WarnIfPlatformsDiffer(snapshot);
             } catch (Exception e) {
                 ReportingError = $"Não foi possível ler o resultado do build: {e.Message}";
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
@@ -224,6 +339,7 @@ namespace CompressorExclusions {
         private static Snapshot NewSnapshot(object solver, CompressorExclusionSettings settings) {
             return new Snapshot {
                 avatarName = AvatarName(solver),
+                platform = CompressorSnapshotStore.CurrentPlatform(),
                 vrcfuryVersion = VrcfuryVersion,
                 builtAt = DateTime.Now.ToString("dd/MM/yyyy HH:mm"),
                 settingsFingerprint = settings.Fingerprint(),

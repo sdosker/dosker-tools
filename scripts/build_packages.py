@@ -1,7 +1,8 @@
 """Validates every package in Packages/ and builds the zips that VCC installs.
 
-Writes <name>-<version>.zip and <name>-<version>.json to the output folder. The .json is the package
-manifest with the download url and checksum, which build_listing.py turns into the VPM listing.
+Writes <name>-<version>.zip, .json and .md to the output folder. The .json is the package manifest with
+the download url and checksum, which build_listing.py turns into the VPM listing. The .md has the release
+notes, taken from that version's section of the changelog.
 
 Usage: python scripts/build_packages.py [--out Dist] [--repo sdosker/dosker-tools]
 """
@@ -9,6 +10,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -21,6 +23,9 @@ PACKAGE_PREFIX = "com.dosker."
 EXCLUDED_NAMES = {"CLAUDE.md", "CLAUDE.md.meta"}
 SOURCE_SUFFIXES = {".cs", ".uss", ".asmdef"}
 OLD_NAMES = re.compile(r"ShaderViewEditorUi")
+VERSION = re.compile(r"\d+\.\d+\.\d+")
+DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+CODE_VERSION = re.compile(r'const string \w*Version = "(\d+\.\d+\.\d+)"')
 # Zip entries need a fixed date so that the same sources always give the same file
 ZIP_DATE = (2020, 1, 1, 0, 0, 0)
 
@@ -68,24 +73,69 @@ def check_sources(files):
             fail(f"Old name left in {path}")
 
 
-def check_versions(package_dir, version):
-    changelog = (package_dir / "CHANGELOG.md").read_text(encoding="utf-8")
-    match = re.search(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
-    if not match or match.group(1) != version:
-        fail(f"{package_dir.name}: package.json is at {version}, CHANGELOG.md at {match and match.group(1)}")
+def version_key(version):
+    return [int(part) for part in version.split(".")]
 
-    version_file = package_dir / "Editor" / "CompressorUi.cs"
-    if version_file.is_file():
-        code = re.search(r'Version = "([^"]+)"', version_file.read_text(encoding="utf-8"))
-        if not code or code.group(1) != version:
-            fail(f"{package_dir.name}: package.json is at {version}, CompressorUi.Version at {code and code.group(1)}")
+
+def check_changelog(package_dir, version):
+    changelog = (package_dir / "CHANGELOG.md").read_text(encoding="utf-8")
+    entries = re.findall(r"^## \[([^\]]+)\](?: - (\S+))?\s*$", changelog, re.MULTILINE)
+    if not entries or entries[0][0] != version:
+        fail(f"{package_dir.name}: package.json is at {version}, CHANGELOG.md at {entries[0][0] if entries else None}")
+
+    for entry, date in entries:
+        if not VERSION.fullmatch(entry):
+            fail(f"{package_dir.name}: CHANGELOG.md has an invalid version: {entry}")
+        if not DATE.fullmatch(date):
+            fail(f"{package_dir.name}: CHANGELOG.md has no valid date for {entry}")
+    versions = [version_key(entry) for entry, _ in entries]
+    dates = [date for _, date in entries]
+    if versions != sorted(versions, reverse=True) or len(set(map(tuple, versions))) != len(versions):
+        fail(f"{package_dir.name}: CHANGELOG.md versions must be unique, newest first")
+    if dates != sorted(dates, reverse=True):
+        fail(f"{package_dir.name}: CHANGELOG.md dates must be newest first")
+
+
+def check_versions(package_dir, version):
+    if not VERSION.fullmatch(version):
+        fail(f"{package_dir.name}: invalid version {version}")
+    check_changelog(package_dir, version)
+
+    # Each package has its own version, so a constant in its code only has to match that package
+    for source in package_dir.rglob("*.cs"):
+        for code in CODE_VERSION.findall(source.read_text(encoding="utf-8")):
+            if code != version:
+                fail(f"{package_dir.name}: package.json is at {version}, {source.name} at {code}")
+
+
+def check_not_tracked():
+    tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    leaked = [path for path in tracked.splitlines() if path.rsplit("/", 1)[-1] in EXCLUDED_NAMES]
+    if leaked:
+        fail(f"These files must never reach the repository: {', '.join(leaked)}")
+
+
+def changelog_section(package_dir, version):
+    changelog = (package_dir / "CHANGELOG.md").read_text(encoding="utf-8")
+    start = re.search(rf"^## \[{re.escape(version)}\].*$", changelog, re.MULTILINE)
+    following = re.search(r"^## \[", changelog[start.end():], re.MULTILINE)
+    end = start.end() + following.start() if following else len(changelog)
+    return changelog[start.end():end].strip() + "\n"
 
 
 def check_dependencies(manifests):
     for manifest in manifests.values():
         for dependency in manifest.get("vpmDependencies", {}):
-            if dependency.startswith(PACKAGE_PREFIX) and dependency not in manifests:
+            if not dependency.startswith(PACKAGE_PREFIX):
+                continue
+            if dependency not in manifests:
                 fail(f"{manifest['name']} depends on unknown package {dependency}")
+            minimum = re.fullmatch(r">=\s*(\d+\.\d+\.\d+)", manifest["vpmDependencies"][dependency])
+            if not minimum:
+                fail(f"{manifest['name']}: the range of {dependency} must look like >=1.2.3")
+            current = manifests[dependency]["version"]
+            if version_key(minimum.group(1)) > version_key(current):
+                fail(f"{manifest['name']} needs {dependency} {minimum.group(0)}, which is at {current}")
 
 
 def build_zip(package_dir, files, output):
@@ -107,6 +157,7 @@ def main():
     package_dirs = sorted(path for path in PACKAGES_DIR.iterdir() if path.name.startswith(PACKAGE_PREFIX))
     if not package_dirs:
         fail("No packages found")
+    check_not_tracked()
 
     manifests = {}
     seen_guids = {}
@@ -132,6 +183,7 @@ def main():
         manifest["url"] = f"https://github.com/{args.repo}/releases/download/{tag}/{output.name}"
         manifest["zipSHA256"] = hashlib.sha256(output.read_bytes()).hexdigest()
         output.with_suffix(".json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        output.with_suffix(".md").write_text(changelog_section(package_dir, version), encoding="utf-8")
         print(f"{output.name}: {sum(path.is_file() for path in files)} files, {output.stat().st_size // 1024} KB")
 
 

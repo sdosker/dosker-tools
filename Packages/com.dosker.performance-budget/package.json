@@ -1,0 +1,17 @@
+{
+  "name": "com.dosker.performance-budget",
+  "displayName": "Dosker Tools - Performance Budget",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "Prevê o ranking do avatar antes do upload, considerando o que o VRCFury muda no build.",
+  "author": {
+    "name": "Dosker",
+    "email": "6579456+sdosker@users.noreply.github.com",
+    "url": "https://github.com/sdosker"
+  },
+  "license": "MIT",
+  "vpmDependencies": {
+    "com.dosker.editor-ui": ">=0.7.0",
+    "com.vrchat.avatars": ">=3.7.0"
+  }
+}

@@ -18,6 +18,8 @@ LISTING_ID = "com.dosker.tools"
 AUTHOR = "Dosker"
 DISPLAY_PREFIX = "Dosker Tools - "
 PAGE_TEMPLATE = Path(__file__).with_name("listing_page.html")
+# Installs every tool, so its dependencies aren't support packages
+META_PACKAGE = "com.dosker.all"
 
 
 def fetch(url, token):
@@ -57,6 +59,8 @@ def build_listing(manifests, listing_url):
 
 
 def package_tag(manifest, required):
+    if manifest["name"] == META_PACKAGE:
+        return "Tudo"
     if manifest["name"] in required:
         return "Dependência"
     return "Avatars" if "com.vrchat.avatars" in manifest.get("vpmDependencies", {}) else "Avatars e Worlds"
@@ -79,7 +83,8 @@ def render_package(name, package, required, repo):
     )
     older_row = f"<dt>Versões anteriores</dt><dd>{older}</dd>" if older else ""
     docs = f"https://github.com/{repo}/tree/main/Packages/{name}#readme"
-    return f"""      <article class="pkg">
+    changelog = f"https://github.com/{repo}/blob/main/Packages/{name}/CHANGELOG.md"
+    return f"""      <article class="pkg" data-search="{html.escape(f"{display} {name} {description}".lower())}">
         <div class="pkg-head">
           <h3>{html.escape(display)}</h3>
           <span class="version mono">{html.escape(versions[0])}</span>
@@ -90,6 +95,7 @@ def render_package(name, package, required, repo):
         <div class="pkg-actions">
           <a class="btn" href="{html.escape(manifest["url"])}">Baixar .zip</a>
           <a href="{html.escape(docs)}">Documentação</a>
+          <a href="{html.escape(changelog)}">Mudanças</a>
         </div>
         <details>
           <summary>Detalhes</summary>
@@ -107,7 +113,10 @@ def build_page(listing, repo):
         name: package["versions"][max(package["versions"], key=version_key)]
         for name, package in listing["packages"].items()
     }
-    required = {dep for manifest in latest.values() for dep in manifest.get("vpmDependencies", {})}
+    required = {
+        dep for name, manifest in latest.items() if name != META_PACKAGE
+        for dep in manifest.get("vpmDependencies", {})
+    }
     names = sorted(latest, key=lambda name: (name in required, latest[name]["displayName"]))
     cards = "\n".join(render_package(name, listing["packages"][name], required, repo) for name in names)
 

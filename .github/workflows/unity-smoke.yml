@@ -1,0 +1,36 @@
+name: Unity smoke test
+
+# Unity needs a license, the VRChat SDK and an avatar project, so this only runs by hand on a runner
+# registered with the "unity" label. Without one, the job stays queued until it's cancelled.
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Avatar project on the runner
+        required: true
+      unity:
+        description: Unity folder on the runner
+        required: true
+        default: F:/Unity/2022.3.22f1
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, unity]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy the packages to the project
+        run: python scripts/sync_to_project.py push "${{ inputs.project }}"
+
+      - name: Compile in Unity
+        run: >
+          & "${{ inputs.unity }}/Editor/Unity.exe" -batchmode -quit -projectPath "${{ inputs.project }}"
+          -logFile unity-smoke.log | Out-Null;
+          if ($LASTEXITCODE -ne 0) { Get-Content unity-smoke.log -Tail 80; exit 1 }
+
+      - name: Remove the packages from the project
+        if: always()
+        run: python scripts/sync_to_project.py clean "${{ inputs.project }}"

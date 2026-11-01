@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using DoskerTools.EditorUi;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -16,6 +17,35 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private const float SimulationStep = 1f / 60f;
     private const int MaxParticlesPerChain = 512;
     private const int GrabSolverIterations = 8;
+    private const string PrefsFile = "VrcEditModePreview";
+    private const float ImpulseStrength = 0.6f;
+    private const string ValidationOk = "VRC_PREVIEW_VALIDATION_OK";
+    private const float CalibrationNudge = 0.3f;
+    private const float FullTurn = Mathf.PI * 2f;
+    private const float BodyNudgeDegrees = 10f;
+    private const float PelvisShare = 0.45f;
+    private const int SpinePasses = 4;
+    private const float MinimumRate = 1f;
+    private const float KeepRestTilt = float.NaN;
+    private const float FreeArms = float.NaN;
+    private const int ArmTableSteps = 40;
+    private const float RestFootBlend = 0.06f;
+    private const float KinkNudge = 0.2f;
+    private const float ArmsDownMuscle = -0.55f;
+    private const float SoftLimitStart = 0.8f;
+    private const float JumpCycles = 0.7f;
+    private const float StandingArms = -70f;
+    private static readonly string[] SpineMuscles = { "Spine Front-Back", "Chest Front-Back", "UpperChest Front-Back" };
+    private static readonly string[] NeckMuscles = { "Neck Nod Down-Up", "Head Nod Down-Up" };
+    private static readonly string[] Fingers = { "Thumb", "Index", "Middle", "Ring", "Little" };
+    private static readonly string[] TestMotionLabels =
+    {
+        "Nenhuma",
+        "Movimento/Parado", "Movimento/Andar", "Movimento/Correr", "Movimento/Agachado", "Movimento/Andar agachado", "Movimento/Sentado", "Movimento/Pular",
+        "Poses/T-pose", "Poses/A-pose",
+        "Pernas/Levantar joelhos", "Pernas/Calcanhar para trás", "Pernas/Levantar perna esticada", "Pernas/Agachamento", "Pernas/Abrir as pernas",
+        "Tronco e braços/Erguer os braços", "Tronco e braços/Abraçar o corpo", "Tronco e braços/Torcer o tronco", "Tronco e braços/Inclinar para os lados", "Tronco e braços/Olhar em volta",
+    };
 
     // Layout de Packages/com.vrchat.base/ShaderLibrary/VRCContacts.cginc.
     private const int MaxShaderTargets = 8;
@@ -23,6 +53,8 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private const int ShaderBufferSize = MaxShaderTargets + 1;
 
     private static readonly Dictionary<(Type, string), FieldInfo> FieldCache = new Dictionary<(Type, string), FieldInfo>();
+    private static readonly HashSet<string> MissingFields = new HashSet<string>();
+    private static readonly Dictionary<string, int> MuscleIndices = new Dictionary<string, int>();
 
     private static Type physBoneType;
     private static Type colliderType;
@@ -45,6 +77,161 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private MaterialPropertyBlock propertyBlock;
     private double lastContactTime;
     private bool writeMaterialContacts = true;
+
+    [Serializable]
+    private sealed class Preferences
+    {
+        public bool showPhysBones = true;
+        public bool showPhysBoneLimits = true;
+        public bool showColliders = true;
+        public bool showContacts = true;
+        public bool showConstraints = true;
+        public bool showConstraintGhosts = true;
+        public bool showLabels = true;
+        public bool drawThroughGeometry = true;
+        public bool onlySelection;
+        public bool allowGrab = true;
+        public bool liveContacts = true;
+        public bool writeMaterialContacts = true;
+        public float handleOpacity = 0.8f;
+        public bool followArmatureLinks = true;
+        public float testMotionSpeed = 1f;
+    }
+
+    private enum TestMotion
+    {
+        None,
+        Idle,
+        Walk,
+        Run,
+        Crouch,
+        CrouchWalk,
+        Sit,
+        Jump,
+        TPose,
+        APose,
+        KneeLift,
+        HeelLift,
+        LegRaise,
+        Squat,
+        LegSpread,
+        ArmsUp,
+        Hug,
+        Twist,
+        SideBend,
+        LookAround
+    }
+
+    // Um osso da roupa e o osso do avatar que ele segue, como o VRCFury faz no build.
+    private sealed class LinkedBone
+    {
+        public Transform Prop;
+        public Transform Avatar;
+        public bool AlignPosition;
+        public bool AlignRotation;
+        public Vector3 PositionOffset;
+        public Quaternion RotationOffset;
+        public Vector3 RestLocalPosition;
+        public Quaternion RestLocalRotation;
+    }
+
+    // Tudo o que define um movimento. As amplitudes são exageradas de propósito: uma animação
+    // contida esconde o clipping que ela existe para mostrar.
+    private sealed class Gait
+    {
+        public float Cycles;
+        public float Stride;
+        public float KneeSwing;
+        public float CrouchThigh;
+        public float CrouchKnee;
+        public float FootRoll;
+        public float TorsoTilt = KeepRestTilt;
+        public float ArmSwing;
+        public float ArmReach;
+        public float ArmRaise;
+        public float Elbow = 0.15f;
+        public float ElbowSwing;
+        public float Shoulder;
+        public float Twist;
+        public float PelvisYaw;
+        public float PelvisRoll;
+        public float Bob;
+        public float Sway;
+        public float Lift;
+        public float LegLift;
+        public float KneeLift;
+        public float LegSpread;
+        public float Balance;
+        public float ArmAngle = FreeArms;
+        public float ArmAngleSwing;
+        public bool ArmsTogether;
+        public float SideBend;
+        public float Look;
+        public float FingerCurl = 0.35f;
+        public float Life = 0.5f;
+        public float FootBlend = RestFootBlend;
+        public float ShoulderBack;
+        public float ShoulderRaise;
+        public float ChestArch;
+        public float HeadRaise;
+    }
+
+    private sealed class SavedBone
+    {
+        public Transform Transform;
+        public Vector3 LocalPosition;
+        public Quaternion LocalRotation;
+    }
+
+    // O sinal de um músculo muda conforme o rig, então é medido no avatar em vez de assumido.
+    private sealed class MotionRig
+    {
+        public Animator Animator;
+        public HumanPoseHandler Handler;
+        public HumanPose RestPose;
+        public HumanPose Pose;
+        public HumanPose Output;
+        public float[] RestMuscles;
+        public float[] BelowZero;
+        public readonly List<Vector2> ArmHeights = new List<Vector2>();
+        public Transform Hips;
+        public Transform LeftFoot;
+        public Transform RightFoot;
+        public float RestFootHeight;
+        public float LegForward;
+        public float LegOutward;
+        public float ArmForward;
+        public float ToesUp;
+        public float ShoulderForward;
+        public float TwistForward;
+        public float HipHeight;
+        public float RestTilt;
+        public float RestPelvisTilt;
+        public Transform Spine;
+        public float BodyRate;
+        public float LegRate;
+        public Transform Neck;
+        public Transform Head;
+        public Vector3 RestHeadForward;
+        public readonly Dictionary<string, float> MuscleRates = new Dictionary<string, float>();
+        public readonly List<SavedBone> Bones = new List<SavedBone>();
+    }
+
+    private readonly List<LinkedBone> linkedBones = new List<LinkedBone>();
+    private readonly List<MotionRig> motionRigs = new List<MotionRig>();
+    private bool followArmatureLinks = true;
+    private TestMotion testMotion;
+    private float testMotionSpeed = 1f;
+    private float testMotionTime;
+    private string searchText = "";
+    [NonSerialized]
+    private UnityEditor.IMGUI.Controls.SearchField searchField;
+    private readonly List<string> lintResults = new List<string>();
+    private bool lintDone;
+    private bool poseOnRelease;
+    private int physBoneTransforms;
+    private int physBoneColliderLinks;
+    private int physBoneCollisionChecks;
 
     private bool showPhysBones = true;
     private bool showPhysBoneLimits = true;
@@ -97,6 +284,30 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         public bool Applied;
         public float Angle;
         public bool Grabbed;
+        public Vector3 LastAvatarPosition;
+        public bool Posed;
+        public readonly List<Vector3> PoseOffsets = new List<Vector3>();
+        public float Stretch;
+        public float Squish;
+        public bool FollowsLink;
+    }
+
+    // Lido uma vez por passo: os valores não mudam entre as partículas de uma cadeia.
+    private sealed class BoneCurve
+    {
+        public float Value;
+        public AnimationCurve Curve;
+
+        public BoneCurve(Component bone, string valueName, string curveName)
+        {
+            Value = Field(bone, valueName, 0f);
+            Curve = Field<AnimationCurve>(bone, curveName);
+        }
+
+        public float At(float ratio)
+        {
+            return Curve != null && Curve.length > 0 ? Value * Curve.Evaluate(ratio) : Value;
+        }
     }
 
     private sealed class ReceiverState
@@ -148,6 +359,12 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         public readonly HashSet<string> Names = new HashSet<string>();
     }
 
+    [MenuItem("Tools/Dosker Tools/Validar Edit-Mode Preview")]
+    private static void RunValidationFromMenu()
+    {
+        RunAutomatedValidation();
+    }
+
     [MenuItem("Tools/Dosker Tools/VRChat Edit-Mode Preview")]
     public static void OpenWindow()
     {
@@ -158,6 +375,8 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
     private void OnEnable()
     {
+        wantsMouseMove = true;
+        LoadPreferences();
         ResolveTypes();
         SceneView.beforeSceneGui += HandleLockMouseDown;
         SceneView.duringSceneGui += DrawSceneGui;
@@ -174,6 +393,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
     private void OnDisable()
     {
+        SavePreferences();
         RestoreAllChains();
         ClearMaterialContacts();
         SceneView.beforeSceneGui -= HandleLockMouseDown;
@@ -189,6 +409,48 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         SceneView.RepaintAll();
     }
 
+    private void LoadPreferences()
+    {
+        var saved = DoskerSettings<Preferences>.Load(PrefsFile);
+        showPhysBones = saved.showPhysBones;
+        showPhysBoneLimits = saved.showPhysBoneLimits;
+        showColliders = saved.showColliders;
+        showContacts = saved.showContacts;
+        showConstraints = saved.showConstraints;
+        showConstraintGhosts = saved.showConstraintGhosts;
+        showLabels = saved.showLabels;
+        drawThroughGeometry = saved.drawThroughGeometry;
+        onlySelection = saved.onlySelection;
+        allowGrab = saved.allowGrab;
+        liveContacts = saved.liveContacts;
+        writeMaterialContacts = saved.writeMaterialContacts;
+        handleOpacity = saved.handleOpacity;
+        followArmatureLinks = saved.followArmatureLinks;
+        testMotionSpeed = saved.testMotionSpeed;
+    }
+
+    private void SavePreferences()
+    {
+        DoskerSettings<Preferences>.Save(PrefsFile, new Preferences
+        {
+            showPhysBones = showPhysBones,
+            showPhysBoneLimits = showPhysBoneLimits,
+            showColliders = showColliders,
+            showContacts = showContacts,
+            showConstraints = showConstraints,
+            showConstraintGhosts = showConstraintGhosts,
+            showLabels = showLabels,
+            drawThroughGeometry = drawThroughGeometry,
+            onlySelection = onlySelection,
+            allowGrab = allowGrab,
+            liveContacts = liveContacts,
+            writeMaterialContacts = writeMaterialContacts,
+            handleOpacity = handleOpacity,
+            followArmatureLinks = followArmatureLinks,
+            testMotionSpeed = testMotionSpeed,
+        });
+    }
+
     private void MarkComponentsDirty()
     {
         componentsDirty = true;
@@ -202,6 +464,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             lockTracking = false;
             RestoreAllChains();
             chains.Clear();
+            ClearPosedState();
             ClearMaterialContacts();
         }
         componentsDirty = true;
@@ -312,13 +575,16 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
         DrawSimulationBar();
         DoskerEditorUi.HorizontalLine();
+        searchText = DoskerEditorUi.Search(ref searchField, searchText, GUILayout.ExpandWidth(true));
 
         scroll = EditorGUILayout.BeginScrollView(scroll);
+        DrawHealth();
         EditorGUI.BeginChangeCheck();
         DrawPhysBonesCard();
         DrawCollidersCard();
         DrawContactsCard();
         DrawConstraintsCard();
+        DrawLintCard();
         DrawDisplayCard();
         if (EditorGUI.EndChangeCheck())
         {
@@ -326,6 +592,23 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             SceneView.RepaintAll();
         }
         EditorGUILayout.EndScrollView();
+        DoskerEditorUi.AboutFooter(typeof(VrcEditModePreviewWindow), "https://github.com/sdosker/dosker-tools/tree/main/Packages/com.dosker.vrc-edit-mode-preview#readme");
+    }
+
+    private bool MatchesSearch(string text)
+    {
+        return string.IsNullOrWhiteSpace(searchText) || text.IndexOf(searchText.Trim(), StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    // A reflexão falha em silêncio depois de uma atualização do SDK, então o que faltou fica visível.
+    private static void DrawHealth()
+    {
+        if (MissingFields.Count > 0)
+        {
+            DoskerEditorUi.Banner(
+                "Esta versão do SDK não tem: " + string.Join(", ", MissingFields.OrderBy(name => name)) + ". O que depende disso fica sem efeito.",
+                DoskerEditorUi.BannerKind.Warning);
+        }
     }
 
     private void DrawSimulationBar()
@@ -370,7 +653,58 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                         "ViewToolMove",
                         DoskerEditorUi.Cyan,
                         "Arrastar ossos pelos pontos na Scene View; os ossos anteriores acompanham.");
+                    poseOnRelease = DoskerEditorUi.ChipToggle(
+                        poseOnRelease,
+                        "Posar",
+                        "AvatarPivot",
+                        DoskerEditorUi.Purple,
+                        "Ao soltar, o osso mantém a pose, se Allow Posing estiver ligado. Clique em Reiniciar para soltar.");
+                    if (DoskerEditorUi.IconButton("PreMatCube", "↯", "Sacudir: dá o mesmo impulso a todas as cadeias, para comparar ajustes.", 22f))
+                    {
+                        ApplyImpulse();
+                    }
                 }
+            }
+
+            EditorGUILayout.Space(4f);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Animação de teste", GUILayout.Width(110f));
+                var nextMotion = (TestMotion)EditorGUILayout.Popup((int)testMotion, TestMotionLabels);
+                if (nextMotion != testMotion)
+                {
+                    SetTestMotion(nextMotion);
+                }
+                using (new EditorGUI.DisabledScope(testMotion == TestMotion.None))
+                {
+                    testMotionSpeed = EditorGUILayout.Slider(testMotionSpeed, 0f, 2f, GUILayout.MinWidth(110f));
+                }
+            }
+        }
+    }
+
+    private void SetTestMotion(TestMotion motion)
+    {
+        testMotion = motion;
+        testMotionTime = 0f;
+        if (motion != TestMotion.None && !simulatePhysBones)
+        {
+            SetSimulation(true);
+            return;
+        }
+        if (simulatePhysBones)
+        {
+            RestartSimulation();
+        }
+    }
+
+    private void ApplyImpulse()
+    {
+        foreach (var chain in chains)
+        {
+            foreach (var particle in chain.Particles.Skip(1))
+            {
+                particle.PreviousPosition -= chain.Root.right * (particle.Length * ImpulseStrength);
             }
         }
     }
@@ -390,10 +724,28 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 return;
             }
             showPhysBoneLimits = EditorGUILayout.ToggleLeft("Limites de ângulo", showPhysBoneLimits);
+            var nextFollow = EditorGUILayout.ToggleLeft(
+                new GUIContent("Seguir Armature Link do VRCFury", "Na simulação, os ossos ligados da roupa acompanham o avatar, como depois do build."),
+                followArmatureLinks);
+            if (nextFollow != followArmatureLinks)
+            {
+                followArmatureLinks = nextFollow;
+                if (simulatePhysBones)
+                {
+                    RestartSimulation();
+                }
+            }
+            if (linkedBones.Count > 0)
+            {
+                EditorGUILayout.LabelField(string.Format("{0} ossos ligados por Armature Link", linkedBones.Count), EditorStyles.miniLabel);
+            }
+            EditorGUILayout.LabelField(
+                string.Format("≈ {0} transforms · {1} colliders · {2} collision checks", physBoneTransforms, physBoneColliderLinks, physBoneCollisionChecks),
+                EditorStyles.miniLabel);
             if (physBones.Count > 0 && simulatePhysBones)
             {
                 EditorGUILayout.Space(2f);
-                foreach (var chain in chains)
+                foreach (var chain in chains.Where(chain => chain.Bone != null && MatchesSearch(chain.Bone.name)))
                 {
                     DrawChainRow(chain);
                 }
@@ -448,11 +800,12 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             if (receivers.Count > 0)
             {
                 EditorGUILayout.Space(2f);
-                foreach (var receiver in receivers)
+                foreach (var receiver in receivers.Where(receiver => receiver != null && MatchesSearch(receiver.name)))
                 {
                     DrawReceiverRow(receiver);
                 }
             }
+            DrawTagMatrix();
         }
     }
 
@@ -469,6 +822,154 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             if (card.Expanded)
             {
                 showConstraintGhosts = EditorGUILayout.ToggleLeft("Pose resolvida (fantasma)", showConstraintGhosts);
+            }
+        }
+    }
+
+    // Quem aciona quem: por tag, quantos senders existem e quantos receivers escutam.
+    private void DrawTagMatrix()
+    {
+        var sent = CountTags(senders);
+        var heard = CountTags(receivers);
+        foreach (var tag in sent.Keys.Union(heard.Keys).OrderBy(tag => tag))
+        {
+            sent.TryGetValue(tag, out var senderCount);
+            heard.TryGetValue(tag, out var receiverCount);
+            var warning = senderCount == 0 || receiverCount == 0 ? " · sem par na cena" : string.Empty;
+            EditorGUILayout.LabelField(string.Format("{0}: {1} senders → {2} receivers{3}", tag, senderCount, receiverCount, warning), EditorStyles.miniLabel);
+        }
+    }
+
+    private static Dictionary<string, int> CountTags(IEnumerable<Component> contacts)
+    {
+        var counts = new Dictionary<string, int>();
+        foreach (var contact in contacts)
+        {
+            foreach (var tag in Field<List<string>>(contact, "collisionTags") ?? new List<string>())
+            {
+                counts.TryGetValue(tag, out var count);
+                counts[tag] = count + 1;
+            }
+        }
+        return counts;
+    }
+
+    private void DrawLintCard()
+    {
+        using (var card = new DoskerEditorUi.CardScope(
+            "Vrc.Lint",
+            "Verificar configuração",
+            "console.warnicon.sml",
+            DoskerEditorUi.Yellow,
+            lintDone ? lintResults.Count.ToString() : null,
+            defaultExpanded: false))
+        {
+            if (!card.Expanded)
+            {
+                return;
+            }
+            if (GUILayout.Button("Verificar agora"))
+            {
+                RunLint();
+            }
+            if (lintDone && lintResults.Count == 0)
+            {
+                EditorGUILayout.LabelField("Nenhum problema encontrado.", EditorStyles.miniLabel);
+            }
+            foreach (var result in lintResults)
+            {
+                EditorGUILayout.LabelField(result, EditorStyles.wordWrappedMiniLabel);
+            }
+        }
+    }
+
+    private void RunLint()
+    {
+        lintResults.Clear();
+        lintDone = true;
+
+        var claimed = new Dictionary<Transform, Component>();
+        var usedColliders = new HashSet<Component>();
+        foreach (var bone in physBones)
+        {
+            var root = RootOf(bone);
+            if (root.childCount == 0 && Field(bone, "endpointPosition", Vector3.zero) == Vector3.zero)
+            {
+                lintResults.Add(string.Format("PhysBone {0}: a raiz não tem filhos nem Endpoint Position, então nada se move.", bone.name));
+            }
+            if (Field<List<Transform>>(bone, "ignoreTransforms")?.Any(item => item == null) == true)
+            {
+                lintResults.Add(string.Format("PhysBone {0}: Ignore Transforms tem um item vazio.", bone.name));
+            }
+            foreach (var transform in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (claimed.TryGetValue(transform, out var other) && other != bone)
+                {
+                    lintResults.Add(string.Format("PhysBones {0} e {1} controlam o mesmo osso ({2}).", other.name, bone.name, transform.name));
+                    break;
+                }
+                claimed[transform] = bone;
+            }
+
+            var linked = Field<IList>(bone, "colliders");
+            if (linked == null)
+            {
+                continue;
+            }
+            foreach (var item in linked)
+            {
+                if (item is Component collider && collider != null)
+                {
+                    usedColliders.Add(collider);
+                }
+                else
+                {
+                    lintResults.Add(string.Format("PhysBone {0}: a lista de colliders tem um item vazio.", bone.name));
+                }
+            }
+        }
+        foreach (var collider in colliders.Where(collider => !usedColliders.Contains(collider)))
+        {
+            lintResults.Add(string.Format("Collider {0}: nenhum PhysBone desta lista o usa.", collider.name));
+        }
+        LintConstraints();
+    }
+
+    private void LintConstraints()
+    {
+        var dependsOn = new Dictionary<Transform, List<Transform>>();
+        foreach (var constraint in constraints)
+        {
+            var sources = ReadSources(constraint);
+            if (sources.Count == 0)
+            {
+                lintResults.Add(string.Format("Constraint {0}: nenhuma fonte definida.", constraint.name));
+            }
+            else if (sources.Sum(source => source.Weight) <= 0f)
+            {
+                lintResults.Add(string.Format("Constraint {0}: todas as fontes têm peso zero.", constraint.name));
+            }
+
+            var target = Field<Transform>(constraint, "TargetTransform");
+            dependsOn[target != null ? target : constraint.transform] = sources.Select(source => source.Transform).ToList();
+        }
+
+        foreach (var start in dependsOn.Keys)
+        {
+            var seen = new HashSet<Transform>();
+            var pending = new Stack<Transform>(dependsOn[start]);
+            while (pending.Count > 0)
+            {
+                var current = pending.Pop();
+                if (current == start)
+                {
+                    lintResults.Add(string.Format("Constraints formam um ciclo em {0}.", start.name));
+                    break;
+                }
+                if (seen.Add(current) && dependsOn.TryGetValue(current, out var next))
+                {
+                    next.ForEach(pending.Push);
+                }
             }
         }
     }
@@ -588,10 +1089,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             }
             var rect = GUILayoutUtility.GetRect(60f, EditorGUIUtility.singleLineHeight, GUILayout.ExpandWidth(true));
             var label = string.Format(
-                "{0}_Angle = {1:0.00}{2}",
+                "{0}_Angle = {1:0.00} · _Stretch = {2:0.00} · _Squish = {3:0.00}{4}{5}",
                 string.IsNullOrEmpty(parameter) ? "(sem parâmetro)" : parameter,
                 chain.Angle,
-                chain.Grabbed ? " · _IsGrabbed" : string.Empty);
+                chain.Stretch,
+                chain.Squish,
+                chain.Grabbed ? " · _IsGrabbed" : string.Empty,
+                chain.Posed ? " · _IsPosed" : string.Empty);
             DoskerEditorUi.ValueBar(rect, chain.Angle, label, chain.Grabbed ? DoskerEditorUi.Purple : DoskerEditorUi.Cyan);
         }
     }
@@ -621,10 +1125,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             var steps = 0;
             while (simulationAccumulator >= SimulationStep && steps < 4)
             {
-                foreach (var chain in chains)
-                {
-                    StepChain(chain);
-                }
+                StepSimulation();
                 simulationAccumulator -= SimulationStep;
                 steps++;
             }
@@ -653,6 +1154,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         CollectComponents(constraintType, constraints);
         var contacts = new List<Component>();
         CollectComponents(contactType, contacts);
+        CountPhysBoneCost();
         senders.Clear();
         receivers.Clear();
         foreach (var contact in contacts)
@@ -673,6 +1175,21 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             {
                 RestartSimulation();
             }
+        }
+    }
+
+    private void CountPhysBoneCost()
+    {
+        physBoneTransforms = 0;
+        physBoneColliderLinks = 0;
+        physBoneCollisionChecks = 0;
+        foreach (var bone in physBones)
+        {
+            var transforms = RootOf(bone).GetComponentsInChildren<Transform>(true).Length;
+            var linked = Field<IList>(bone, "colliders")?.Count ?? 0;
+            physBoneTransforms += transforms;
+            physBoneColliderLinks += linked;
+            physBoneCollisionChecks += transforms * linked;
         }
     }
 
@@ -740,6 +1257,10 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
         }
         FieldCache[key] = field;
+        if (field == null)
+        {
+            MissingFields.Add(name);
+        }
         return field;
     }
 
@@ -773,13 +1294,6 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     {
         var root = Field<Transform>(component, "rootTransform");
         return root != null ? root : component.transform;
-    }
-
-    private static float CurveValue(Component component, string valueName, string curveName, float ratio)
-    {
-        var value = Field(component, valueName, 0f);
-        var curve = Field<AnimationCurve>(component, curveName);
-        return curve != null && curve.length > 0 ? value * curve.Evaluate(ratio) : value;
     }
 
     private static float MaxScale(Transform transform)
@@ -1315,23 +1829,888 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             RestoreAllChains();
             chains.Clear();
+            ClearPosedState();
+            testMotion = TestMotion.None;
             grabbedChain = null;
         }
         SceneView.RepaintAll();
+    }
+
+    // A ordem importa: a roupa segue o avatar já animado, e os PhysBones da própria roupa vêm depois,
+    // porque precisam dos ossos pais no lugar.
+    private void StepSimulation()
+    {
+        ApplyTestMotion();
+        foreach (var chain in chains.Where(chain => !chain.FollowsLink))
+        {
+            StepChain(chain);
+        }
+        ApplyArmatureLinks();
+        foreach (var chain in chains.Where(chain => chain.FollowsLink))
+        {
+            StepChain(chain);
+        }
+    }
+
+    private void ClearPosedState()
+    {
+        linkedBones.Clear();
+        foreach (var rig in motionRigs)
+        {
+            rig.Handler.Dispose();
+        }
+        motionRigs.Clear();
+    }
+
+    // ---------------------------------------------------------------- Armature Link
+
+    private static Type FindVrcfuryType()
+    {
+        return FindType("VF.Model.VRCFury");
+    }
+
+    private void BuildArmatureLinks()
+    {
+        var modelType = FindVrcfuryType();
+        if (!followArmatureLinks || modelType == null || avatarDescriptorType == null)
+        {
+            return;
+        }
+
+        var avatars = new List<Component>();
+        CollectComponents(avatarDescriptorType, avatars);
+        foreach (var avatar in avatars)
+        {
+            var animator = avatar.GetComponent<Animator>();
+            foreach (var component in avatar.GetComponentsInChildren(modelType, true))
+            {
+                var link = Field<object>(component, "content");
+                if (link != null && link.GetType().Name == "ArmatureLink")
+                {
+                    AddArmatureLink(link, avatar.transform, animator);
+                }
+            }
+        }
+    }
+
+    private void AddArmatureLink(object link, Transform avatarRoot, Animator animator)
+    {
+        var propObject = Field<GameObject>(link, "propBone");
+        var avatarBone = propObject != null ? FindLinkTarget(link, avatarRoot, animator) : null;
+        if (avatarBone == null)
+        {
+            return;
+        }
+
+        var propBone = propObject.transform;
+        var suffix = Field(link, "removeBoneSuffix", string.Empty);
+        if (string.IsNullOrWhiteSpace(suffix) && propBone.name.Contains(avatarBone.name) && propBone.name != avatarBone.name)
+        {
+            suffix = propBone.name.Replace(avatarBone.name, string.Empty);
+        }
+
+        var humanoid = new HashSet<Transform>();
+        if (animator != null && animator.isHuman)
+        {
+            for (var bone = HumanBodyBones.Hips; bone < HumanBodyBones.LastBone; bone++)
+            {
+                var transform = animator.GetBoneTransform(bone);
+                if (transform != null)
+                {
+                    humanoid.Add(transform);
+                }
+            }
+        }
+
+        // PhysBones da própria roupa continuam donos dos seus ossos, a não ser em ossos humanoides.
+        var ownedByPhysBones = new HashSet<Transform>();
+        foreach (var bone in physBones)
+        {
+            var root = RootOf(bone);
+            if (root.IsChildOf(propBone))
+            {
+                ownedByPhysBones.UnionWith(root.GetComponentsInChildren<Transform>(true).Where(item => item != root));
+            }
+        }
+
+        var recursive = Field(link, "recursive", false);
+        var pending = new Queue<(Transform prop, Transform avatar)>();
+        pending.Enqueue((propBone, avatarBone));
+        while (pending.Count > 0)
+        {
+            var (prop, target) = pending.Dequeue();
+            AddLinkedBone(link, prop, target);
+            if (!recursive)
+            {
+                continue;
+            }
+            foreach (Transform child in prop)
+            {
+                var searchName = string.IsNullOrEmpty(suffix) ? child.name : child.name.Replace(suffix, string.Empty);
+                var match = target.Find(searchName);
+                if (match != null && (humanoid.Contains(match) || !ownedByPhysBones.Contains(child)))
+                {
+                    pending.Enqueue((child, match));
+                }
+            }
+        }
+    }
+
+    private static Transform FindLinkTarget(object link, Transform avatarRoot, Animator animator)
+    {
+        if (!(Field<object>(link, "linkTo") is IEnumerable targets))
+        {
+            return null;
+        }
+
+        foreach (var target in targets)
+        {
+            Transform found = null;
+            if (Field(target, "useBone", false))
+            {
+                found = animator != null && animator.isHuman ? animator.GetBoneTransform((HumanBodyBones)EnumField(target, "bone")) : null;
+            }
+            else if (Field(target, "useObj", false))
+            {
+                var linked = Field<GameObject>(target, "obj");
+                found = linked != null ? linked.transform : null;
+            }
+            else
+            {
+                found = avatarRoot;
+            }
+
+            var offset = Field(target, "offset", string.Empty);
+            if (found != null && !string.IsNullOrWhiteSpace(offset))
+            {
+                found = found.Find(offset);
+            }
+            if (found != null)
+            {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private void AddLinkedBone(object link, Transform prop, Transform avatar)
+    {
+        linkedBones.Add(new LinkedBone
+        {
+            Prop = prop,
+            Avatar = avatar,
+            AlignPosition = Field(link, "alignPosition", false),
+            AlignRotation = Field(link, "alignRotation", false),
+            PositionOffset = avatar.InverseTransformPoint(prop.position),
+            RotationOffset = Quaternion.Inverse(avatar.rotation) * prop.rotation,
+            RestLocalPosition = prop.localPosition,
+            RestLocalRotation = prop.localRotation,
+        });
+    }
+
+    private void ApplyArmatureLinks()
+    {
+        foreach (var bone in linkedBones)
+        {
+            if (bone.Prop == null || bone.Avatar == null)
+            {
+                continue;
+            }
+            bone.Prop.position = bone.AlignPosition ? bone.Avatar.position : bone.Avatar.TransformPoint(bone.PositionOffset);
+            bone.Prop.rotation = bone.AlignRotation ? bone.Avatar.rotation : bone.Avatar.rotation * bone.RotationOffset;
+        }
+    }
+
+    private void RestoreArmatureLinks()
+    {
+        foreach (var bone in Enumerable.Reverse(linkedBones))
+        {
+            if (bone.Prop != null)
+            {
+                bone.Prop.localPosition = bone.RestLocalPosition;
+                bone.Prop.localRotation = bone.RestLocalRotation;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Animações de teste
+
+    private void BuildMotionRigs()
+    {
+        if (testMotion == TestMotion.None || avatarDescriptorType == null)
+        {
+            return;
+        }
+
+        var avatars = new List<Component>();
+        CollectComponents(avatarDescriptorType, avatars);
+        foreach (var avatar in avatars)
+        {
+            var animator = avatar.GetComponent<Animator>();
+            if (animator != null && animator.isHuman && animator.avatar != null && animator.avatar.isValid)
+            {
+                motionRigs.Add(CreateMotionRig(animator));
+            }
+        }
+    }
+
+    private static MotionRig CreateMotionRig(Animator animator)
+    {
+        var rig = new MotionRig
+        {
+            Animator = animator,
+            Handler = new HumanPoseHandler(animator.avatar, animator.transform),
+            Hips = animator.GetBoneTransform(HumanBodyBones.Hips),
+            LeftFoot = animator.GetBoneTransform(HumanBodyBones.LeftFoot),
+            RightFoot = animator.GetBoneTransform(HumanBodyBones.RightFoot),
+            Neck = animator.GetBoneTransform(HumanBodyBones.Neck),
+            Head = animator.GetBoneTransform(HumanBodyBones.Head),
+            Spine = animator.GetBoneTransform(HumanBodyBones.Spine),
+        };
+        if (rig.Neck == null)
+        {
+            rig.Neck = rig.Head;
+        }
+        for (var bone = HumanBodyBones.Hips; bone < HumanBodyBones.LastBone; bone++)
+        {
+            var transform = animator.GetBoneTransform(bone);
+            if (transform != null)
+            {
+                rig.Bones.Add(new SavedBone { Transform = transform, LocalPosition = transform.localPosition, LocalRotation = transform.localRotation });
+            }
+        }
+
+        rig.Handler.GetHumanPose(ref rig.RestPose);
+        rig.Pose = rig.RestPose;
+        rig.Pose.muscles = (float[])rig.RestPose.muscles.Clone();
+        rig.Output = rig.RestPose;
+        rig.Output.muscles = (float[])rig.RestPose.muscles.Clone();
+        MeasureKinks(rig);
+        rig.RestMuscles = rig.RestPose.muscles.Select((value, index) => value < 0f ? value / rig.BelowZero[index] : value).ToArray();
+        rig.HipHeight = rig.Hips != null ? Mathf.Max(0.1f, rig.Hips.position.y - animator.transform.position.y) : 1f;
+        rig.RestFootHeight = FootHeight(rig, RestFootBlend);
+        var forward = animator.transform.forward;
+        rig.LegForward = MeasureSign(rig, "Left Upper Leg Front-Back", HumanBodyBones.LeftLowerLeg, forward);
+        rig.LegOutward = MeasureSign(rig, "Left Upper Leg In-Out", HumanBodyBones.LeftLowerLeg, -animator.transform.right);
+        rig.ArmForward = MeasureSign(rig, "Left Arm Front-Back", HumanBodyBones.LeftLowerArm, forward);
+        rig.ToesUp = MeasureSign(rig, "Left Foot Up-Down", HumanBodyBones.LeftToes, animator.transform.up);
+        rig.ShoulderForward = MeasureSign(rig, "Left Shoulder Front-Back", HumanBodyBones.LeftUpperArm, forward);
+        rig.TwistForward = MeasureSign(rig, "Chest Twist Left-Right", HumanBodyBones.LeftUpperArm, forward);
+        rig.RestHeadForward = rig.Head != null ? rig.Head.forward : forward;
+        rig.RestTilt = TorsoTilt(rig);
+        rig.RestPelvisTilt = PelvisTilt(rig);
+        MeasureSpineRate(rig, "Spine Front-Back", HumanBodyBones.Spine, HumanBodyBones.Chest, HumanBodyBones.UpperChest, HumanBodyBones.Neck);
+        MeasureSpineRate(rig, "Chest Front-Back", HumanBodyBones.Chest, HumanBodyBones.UpperChest, HumanBodyBones.Neck, HumanBodyBones.Head);
+        MeasureSpineRate(rig, "UpperChest Front-Back", HumanBodyBones.UpperChest, HumanBodyBones.Neck, HumanBodyBones.Head);
+        foreach (var muscle in NeckMuscles)
+        {
+            rig.MuscleRates[muscle] = MeasureRate(rig, muscle, () => HeadPitch(rig));
+        }
+        MeasureArmHeights(rig);
+        rig.LegRate = MeasureRate(rig, "Left Upper Leg Front-Back", () => ThighPitch(rig, HumanBodyBones.LeftUpperLeg, HumanBodyBones.LeftLowerLeg));
+        rig.BodyRate = MeasureBodyRate(rig);
+        return rig;
+    }
+
+    // O Unity usa um limite para cada lado do zero, então o osso muda de velocidade de repente quando o
+    // músculo cruza o zero. Medir a razão no avatar permite trabalhar numa escala em que o giro é contínuo.
+    private static void MeasureKinks(MotionRig rig)
+    {
+        rig.BelowZero = Enumerable.Repeat(1f, rig.RestPose.muscles.Length).ToArray();
+        var pose = rig.RestPose;
+        pose.muscles = new float[rig.RestPose.muscles.Length];
+        for (var index = 0; index < pose.muscles.Length; index++)
+        {
+            var boneIndex = HumanTrait.BoneFromMuscle(index);
+            var bone = boneIndex >= 0 ? rig.Animator.GetBoneTransform((HumanBodyBones)boneIndex) : null;
+            if (bone == null)
+            {
+                continue;
+            }
+
+            rig.Handler.SetHumanPose(ref pose);
+            var center = bone.localRotation;
+            pose.muscles[index] = KinkNudge;
+            rig.Handler.SetHumanPose(ref pose);
+            var above = Quaternion.Angle(center, bone.localRotation);
+            pose.muscles[index] = -KinkNudge;
+            rig.Handler.SetHumanPose(ref pose);
+            var below = Quaternion.Angle(center, bone.localRotation);
+            pose.muscles[index] = 0f;
+            if (above >= 0.01f && below >= 0.01f)
+            {
+                rig.BelowZero[index] = Mathf.Clamp(above / below, 0.1f, 10f);
+            }
+        }
+        RestoreMotionRig(rig);
+    }
+
+    // Tabela de altura do braço por valor de músculo: o ângulo não é uma reta, porque depende de quanto o
+    // braço aponta para a frente, e corrigir a cada quadro faz a mão tremer quando o alvo está longe.
+    private static void MeasureArmHeights(MotionRig rig)
+    {
+        var index = MuscleIndex("Left Arm Down-Up");
+        var pose = rig.RestPose;
+        pose.muscles = (float[])rig.RestPose.muscles.Clone();
+        for (var step = 0; step <= ArmTableSteps; step++)
+        {
+            var muscle = Mathf.Lerp(-1f, 1f, (float)step / ArmTableSteps);
+            pose.muscles[index] = muscle;
+            rig.Handler.SetHumanPose(ref pose);
+            var point = new Vector2(ArmHeight(rig), muscle < 0f ? muscle / rig.BelowZero[index] : muscle);
+            // No fim do curso o braço pode descer antes de subir: a tabela começa no ponto mais baixo.
+            if (rig.ArmHeights.Count == 1 && point.x <= rig.ArmHeights[0].x)
+            {
+                rig.ArmHeights[0] = point;
+            }
+            else if (rig.ArmHeights.Count == 0 || point.x > rig.ArmHeights[rig.ArmHeights.Count - 1].x)
+            {
+                rig.ArmHeights.Add(point);
+            }
+        }
+        RestoreMotionRig(rig);
+    }
+
+    private static float ArmMuscle(MotionRig rig, float angle)
+    {
+        var table = rig.ArmHeights;
+        for (var index = 1; index < table.Count; index++)
+        {
+            if (angle <= table[index].x)
+            {
+                return Mathf.Lerp(table[index - 1].y, table[index].y, Mathf.InverseLerp(table[index - 1].x, table[index].x, angle));
+            }
+        }
+        return table.Count > 0 ? table[table.Count - 1].y : 0f;
+    }
+
+    private static void ApplyPose(MotionRig rig)
+    {
+        for (var index = 0; index < rig.Pose.muscles.Length; index++)
+        {
+            var value = rig.Pose.muscles[index];
+            rig.Output.muscles[index] = SoftLimit(value < 0f ? value * rig.BelowZero[index] : value);
+        }
+        rig.Output.bodyPosition = rig.Pose.bodyPosition;
+        rig.Output.bodyRotation = rig.Pose.bodyRotation;
+        rig.Handler.SetHumanPose(ref rig.Output);
+    }
+
+    private static float MeasureSign(MotionRig rig, string muscle, HumanBodyBones bone, Vector3 direction)
+    {
+        var transform = rig.Animator.GetBoneTransform(bone);
+        var index = MuscleIndex(muscle);
+        if (transform == null || index < 0)
+        {
+            return 1f;
+        }
+
+        var before = transform.position;
+        var pose = rig.RestPose;
+        pose.muscles = (float[])rig.RestPose.muscles.Clone();
+        pose.muscles[index] = Mathf.Clamp(pose.muscles[index] + CalibrationNudge, -1f, 1f);
+        rig.Handler.SetHumanPose(ref pose);
+        var moved = Vector3.Dot(transform.position - before, direction);
+        RestoreMotionRig(rig);
+        return moved >= 0f ? 1f : -1f;
+    }
+
+    // Graus por unidade de músculo, medidos no avatar: o limite de cada osso muda de rig para rig.
+    private static float MeasureRate(MotionRig rig, string muscle, Func<float> metric)
+    {
+        var index = MuscleIndex(muscle);
+        if (index < 0)
+        {
+            return 0f;
+        }
+
+        var before = metric();
+        var pose = rig.RestPose;
+        pose.muscles = (float[])rig.RestPose.muscles.Clone();
+        var rest = pose.muscles[index];
+        var nudge = rest > 0f ? -CalibrationNudge : CalibrationNudge;
+        pose.muscles[index] = rest + nudge;
+        rig.Handler.SetHumanPose(ref pose);
+        var rate = (metric() - before) / nudge;
+        RestoreMotionRig(rig);
+        return rest < 0f ? rate * rig.BelowZero[index] : rate;
+    }
+
+    // Mede o giro do próprio osso, sem o braço de alavanca até o pescoço, para repartir por igual.
+    private static void MeasureSpineRate(MotionRig rig, string muscle, HumanBodyBones bone, params HumanBodyBones[] next)
+    {
+        var start = rig.Animator.GetBoneTransform(bone);
+        var end = next.Select(rig.Animator.GetBoneTransform).FirstOrDefault(item => item != null);
+        rig.MuscleRates[muscle] = start != null && end != null
+            ? MeasureRate(rig, muscle, () => SideAngle(rig, end.position - start.position))
+            : 0f;
+    }
+
+    private static float MeasureBodyRate(MotionRig rig)
+    {
+        var before = TorsoTilt(rig);
+        var pose = rig.RestPose;
+        pose.muscles = (float[])rig.RestPose.muscles.Clone();
+        pose.bodyRotation = Quaternion.AngleAxis(BodyNudgeDegrees, Vector3.right) * pose.bodyRotation;
+        rig.Handler.SetHumanPose(ref pose);
+        var rate = (TorsoTilt(rig) - before) / BodyNudgeDegrees;
+        RestoreMotionRig(rig);
+        return rate;
+    }
+
+    // Ângulo no plano lateral do avatar: 0 é vertical, e positivo inclina para a frente.
+    private static float SideAngle(MotionRig rig, Vector3 direction)
+    {
+        var root = rig.Animator.transform;
+        return Mathf.Atan2(Vector3.Dot(direction, root.forward), Vector3.Dot(direction, root.up)) * Mathf.Rad2Deg;
+    }
+
+    private static float TorsoTilt(MotionRig rig)
+    {
+        return rig.Neck != null && rig.Hips != null ? SideAngle(rig, rig.Neck.position - rig.Hips.position) : 0f;
+    }
+
+    private static float PelvisTilt(MotionRig rig)
+    {
+        return rig.Spine != null && rig.Hips != null ? SideAngle(rig, rig.Spine.position - rig.Hips.position) : 0f;
+    }
+
+    private static float HeadPitch(MotionRig rig)
+    {
+        return rig.Head != null ? Mathf.DeltaAngle(SideAngle(rig, rig.RestHeadForward), SideAngle(rig, rig.Head.forward)) : 0f;
+    }
+
+    private static float ThighPitch(MotionRig rig, HumanBodyBones upper, HumanBodyBones lower)
+    {
+        var thigh = rig.Animator.GetBoneTransform(upper);
+        var knee = rig.Animator.GetBoneTransform(lower);
+        return thigh != null && knee != null ? -SideAngle(rig, thigh.position - knee.position) : 0f;
+    }
+
+    // Altura do braço em graus: 0 é na horizontal, e negativo aponta para baixo.
+    private static float ArmHeight(MotionRig rig)
+    {
+        var shoulder = rig.Animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+        var elbow = rig.Animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+        if (shoulder == null || elbow == null)
+        {
+            return 0f;
+        }
+        var direction = (elbow.position - shoulder.position).normalized;
+        return Mathf.Asin(Mathf.Clamp(Vector3.Dot(direction, rig.Animator.transform.up), -1f, 1f)) * Mathf.Rad2Deg;
+    }
+
+    private static int MuscleIndex(string name)
+    {
+        if (MuscleIndices.Count == 0)
+        {
+            var names = HumanTrait.MuscleName;
+            for (var index = 0; index < names.Length; index++)
+            {
+                MuscleIndices[names[index]] = index;
+            }
+        }
+        return MuscleIndices.TryGetValue(name, out var found) ? found : -1;
+    }
+
+    // O mínimo é suave: um mínimo simples muda de direção de repente quando o apoio passa de um pé para
+    // o outro, e o corpo inteiro dá um tranco duas vezes por ciclo.
+    private static float FootHeight(MotionRig rig, float footBlend)
+    {
+        var root = rig.Animator.transform.position.y;
+        var left = rig.LeftFoot != null ? rig.LeftFoot.position.y : root;
+        var right = rig.RightFoot != null ? rig.RightFoot.position.y : root;
+        var blend = rig.HipHeight * footBlend;
+        var mix = Mathf.Clamp01(0.5f + 0.5f * (right - left) / blend);
+        return Mathf.Lerp(right, left, mix) - blend * mix * (1f - mix) - root;
+    }
+
+    // Sobe e desce sem quinas, ao contrário de cortar o seno em zero: vai de 0 a 1 uma vez por volta.
+    private static float Lobe(float angle)
+    {
+        var wave = 0.5f + 0.5f * Mathf.Sin(angle);
+        return wave * wave;
+    }
+
+    private static float Bump(float moment, float start, float end)
+    {
+        if (moment <= start || moment >= end)
+        {
+            return 0f;
+        }
+        var wave = Mathf.Sin((moment - start) / (end - start) * Mathf.PI);
+        return wave * wave;
+    }
+
+    private void ApplyTestMotion()
+    {
+        if (testMotion == TestMotion.None)
+        {
+            return;
+        }
+
+        testMotionTime += SimulationStep * testMotionSpeed;
+        foreach (var rig in motionRigs)
+        {
+            ApplyMotionToRig(rig);
+        }
+    }
+
+    private Gait CurrentGait()
+    {
+        switch (testMotion)
+        {
+            case TestMotion.Idle:
+                return new Gait { Cycles = 0.3f, ArmSwing = 0.1f, ElbowSwing = 0.1f, Shoulder = 0.15f, Twist = 0.08f, PelvisYaw = 2f, PelvisRoll = 2f, Bob = 0.01f, Sway = 0.012f, Life = 1f };
+            case TestMotion.Walk:
+                return new Gait
+                {
+                    Cycles = 0.9f, Stride = 0.42f, KneeSwing = 0.6f, FootRoll = 0.35f, TorsoTilt = 5f, FootBlend = 0.1f,
+                    ArmSwing = 0.38f, ArmReach = 0.08f, Elbow = 0.2f, ElbowSwing = 0.35f, Shoulder = 0.25f,
+                    Twist = 0.3f, PelvisYaw = 8f, PelvisRoll = 5f, Bob = 0.025f, Sway = 0.018f,
+                };
+            case TestMotion.Run:
+                return new Gait
+                {
+                    Cycles = 1.5f, Stride = 0.85f, KneeSwing = 1.1f, FootRoll = 0.45f, TorsoTilt = 18f, FootBlend = 0.3f,
+                    ArmSwing = 0.6f, ArmReach = 0.12f, Elbow = 0.75f, ElbowSwing = 0.3f, Shoulder = 0.35f,
+                    Twist = 0.45f, PelvisYaw = 14f, PelvisRoll = 6f, Bob = 0.05f, Sway = 0.02f,
+                };
+            case TestMotion.Crouch:
+                return new Gait
+                {
+                    Cycles = 0.35f, CrouchThigh = 1.85f, CrouchKnee = 1.1f, TorsoTilt = 35f,
+                    ArmSwing = 0.12f, ArmReach = 0.25f, Elbow = 0.45f, ElbowSwing = 0.15f, Shoulder = 0.2f,
+                    Twist = 0.15f, PelvisYaw = 3f, Bob = 0.03f, Sway = 0.02f,
+                };
+            case TestMotion.CrouchWalk:
+                return new Gait
+                {
+                    Cycles = 0.6f, Stride = 0.7f, KneeSwing = 0.35f, CrouchThigh = 1.33f, CrouchKnee = 1f, FootRoll = 0.3f, TorsoTilt = 52f,
+                    ArmSwing = 0.35f, ArmReach = 0.35f, Elbow = 0.55f, ElbowSwing = 0.35f, Shoulder = 0.35f,
+                    Twist = 0.4f, PelvisYaw = 10f, PelvisRoll = 5f, Bob = 0.03f, Sway = 0.03f,
+                };
+            case TestMotion.Sit:
+                return new Gait
+                {
+                    Cycles = 0.25f, CrouchThigh = 2.6f, CrouchKnee = 1.1f, TorsoTilt = 4f,
+                    ArmSwing = 0.12f, ArmReach = 0.15f, Elbow = 0.35f, Shoulder = 0.15f, Twist = 0.1f,
+                };
+            case TestMotion.Jump:
+                var moment = Mathf.Repeat(testMotionTime * JumpCycles, 1f);
+                var tuck = Bump(moment, 0.02f, 0.4f);
+                var air = Bump(moment, 0.28f, 0.72f);
+                var land = Bump(moment, 0.6f, 0.98f);
+                // Prepara com os braços para trás, sobe jogando-os para cima e amortece ao cair.
+                return new Gait
+                {
+                    Cycles = JumpCycles, CrouchThigh = 1.15f * tuck + 0.25f * air + 0.8f * land, CrouchKnee = 0.9f * tuck + 0.35f * air + 0.7f * land,
+                    TorsoTilt = 28f * tuck - 4f * air + 20f * land, ArmReach = 1.1f * air - 0.6f * tuck - 0.2f * land, ArmRaise = 1f * air,
+                    Elbow = 0.25f + 0.3f * tuck + 0.25f * land, Lift = 0.45f * air,
+                };
+            case TestMotion.TPose:
+                return StretchGait(0.125f, -4f);
+            case TestMotion.APose:
+                return StretchGait(0.14f, -42f);
+            case TestMotion.KneeLift:
+                return new Gait
+                {
+                    Cycles = 0.55f, LegLift = 1.33f, KneeLift = 1.25f, FootRoll = 0.2f, TorsoTilt = 4f, Balance = 0.05f,
+                    ArmSwing = 0.45f, Elbow = 0.6f, ElbowSwing = 0.3f, Shoulder = 0.2f, Twist = 0.2f, PelvisYaw = 5f, PelvisRoll = 4f, Bob = 0.015f,
+                };
+            case TestMotion.HeelLift:
+                return new Gait
+                {
+                    Cycles = 0.6f, LegLift = -0.15f, KneeLift = 1.5f, FootRoll = 0.3f, TorsoTilt = 6f, Balance = 0.05f,
+                    ArmSwing = 0.35f, Elbow = 0.45f, ElbowSwing = 0.3f, Shoulder = 0.2f, Twist = 0.2f, PelvisYaw = 4f, PelvisRoll = 4f, Bob = 0.015f,
+                };
+            case TestMotion.LegRaise:
+                return new Gait
+                {
+                    Cycles = 0.4f, LegLift = 0.96f, KneeLift = 0.08f, FootRoll = 0.25f, TorsoTilt = 2f, Balance = 0.06f,
+                    ArmSwing = 0.3f, ArmReach = 0.1f, Elbow = 0.3f, ElbowSwing = 0.2f, Shoulder = 0.15f, Twist = 0.15f, PelvisYaw = 4f, PelvisRoll = 5f,
+                };
+            case TestMotion.Squat:
+                var depth = 0.5f - 0.5f * Mathf.Cos(testMotionTime * 0.45f * FullTurn);
+                return new Gait
+                {
+                    Cycles = 0.45f, CrouchThigh = 1.6f * depth, CrouchKnee = 1.1f * depth, TorsoTilt = 35f * depth, LegSpread = 0.15f,
+                    ArmReach = 0.1f + 0.9f * depth, ArmRaise = 0.2f * depth, Elbow = 0.2f + 0.15f * depth, ArmsTogether = true,
+                };
+            case TestMotion.LegSpread:
+                var open = 0.5f - 0.5f * Mathf.Cos(testMotionTime * 0.4f * FullTurn);
+                return new Gait
+                {
+                    Cycles = 0.4f, LegSpread = 0.15f + 0.8f * open, CrouchThigh = 0.3f * open, CrouchKnee = 0.3f * open, TorsoTilt = 12f * open,
+                    ArmAngle = -60f + 20f * open, Elbow = 0.3f, ArmsTogether = true,
+                };
+            case TestMotion.ArmsUp:
+                return new Gait
+                {
+                    Cycles = 0.35f, ArmAngle = -2f, ArmAngleSwing = 50f, Elbow = 0.12f, ElbowSwing = 0.12f, Shoulder = 0.1f, ArmsTogether = true,
+                    Bob = 0.01f,
+                };
+            case TestMotion.Hug:
+                return new Gait
+                {
+                    Cycles = 0.3f, ArmAngle = -62f, ArmAngleSwing = 5f, ArmSwing = 0.2f, ArmReach = 0.85f, Elbow = 0.5f, ElbowSwing = 0.1f, Shoulder = 0.3f, TorsoTilt = 8f,
+                    ArmsTogether = true, Bob = 0.005f, FingerCurl = 0.5f,
+                };
+            case TestMotion.Twist:
+                return new Gait
+                {
+                    Cycles = 0.35f, Twist = 0.95f, PelvisYaw = 14f, ArmAngle = -35f, ArmAngleSwing = 8f, ArmSwing = 0.4f, Elbow = 0.4f, Shoulder = 0.3f,
+                };
+            case TestMotion.SideBend:
+                return new Gait
+                {
+                    Cycles = 0.3f, SideBend = 0.75f, PelvisRoll = 3f, Sway = 0.03f, ArmAngle = -55f, ArmAngleSwing = 12f, Elbow = 0.25f, ArmsTogether = true,
+                };
+            case TestMotion.LookAround:
+                return new Gait
+                {
+                    Cycles = 0.2f, Look = 0.85f, Twist = 0.2f, ArmSwing = 0.08f, Elbow = 0.2f, PelvisYaw = 5f, Sway = 0.012f, Life = 0.6f,
+                };
+            default:
+                return new Gait();
+        }
+    }
+
+    // Um alongamento em vez de uma pose congelada: em pé, ajeita os ombros, sobe os braços passando um pouco
+    // do ponto, fica na pose abrindo o peito e girando o tronco devagar, e volta a ficar em pé.
+    private Gait StretchGait(float cycles, float armAngle)
+    {
+        var moment = Mathf.Repeat(testMotionTime * cycles, 1f);
+        var settle = Bump(moment, 0.02f, 0.2f);
+        var rise = Bump(moment, 0.18f, 0.38f);
+        var hold = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.2f, 0.36f, moment)) * (1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.72f, 0.9f, moment)));
+        return new Gait
+        {
+            Cycles = cycles, ArmAngle = Mathf.Lerp(StandingArms, armAngle, hold) + 6f * Bump(moment, 0.3f, 0.46f), ArmAngleSwing = 3f,
+            ArmReach = 0.12f * (1f - hold), ArmSwing = 0.04f, Elbow = 0.04f + 0.2f * (1f - hold) + 0.35f * rise, ElbowSwing = 0.04f,
+            ShoulderBack = 0.35f * hold, ShoulderRaise = 0.35f * settle + 0.15f * rise, ChestArch = 13f * hold, HeadRaise = 14f * hold,
+            Twist = 0.5f * hold, SideBend = 0.2f * hold, Look = 0.45f * hold, PelvisYaw = 3f, PelvisRoll = 2f, Bob = 0.006f, Sway = 0.016f,
+            FingerCurl = 0.4f - 0.33f * hold, Life = 1f,
+        };
+    }
+
+    private void ApplyMotionToRig(MotionRig rig)
+    {
+        rig.RestMuscles.CopyTo(rig.Pose.muscles, 0);
+        rig.Pose.bodyPosition = rig.RestPose.bodyPosition;
+        rig.Pose.bodyRotation = rig.RestPose.bodyRotation;
+
+        var gait = CurrentGait();
+        var phase = testMotionTime * gait.Cycles * FullTurn;
+        SetLeg(rig, "Left", phase, gait);
+        SetLeg(rig, "Right", phase + Mathf.PI, gait);
+        SetArm(rig, "Left", gait.ArmsTogether ? phase : phase + Mathf.PI, gait);
+        SetArm(rig, "Right", phase, gait);
+        AddLife(rig, gait);
+
+        // Os ombros giram contra o quadril: o ombro esquerdo vai à frente com a perna direita.
+        var shoulders = Mathf.Sin(phase + Mathf.PI) * gait.Twist * rig.TwistForward;
+        AddMuscle(rig, "Spine Twist Left-Right", shoulders * 0.5f);
+        AddMuscle(rig, "Chest Twist Left-Right", shoulders);
+        AddMuscle(rig, "UpperChest Twist Left-Right", shoulders);
+        AddMuscle(rig, "Neck Turn Left-Right", -shoulders * 0.5f);
+
+        foreach (var (muscle, share) in new[] { ("Spine Left-Right", 0.6f), ("Chest Left-Right", 1f), ("UpperChest Left-Right", 1f) })
+        {
+            AddMuscle(rig, muscle, Mathf.Sin(phase) * gait.SideBend * share);
+        }
+        AddMuscle(rig, "Neck Turn Left-Right", Mathf.Sin(phase) * gait.Look * 0.8f);
+        AddMuscle(rig, "Head Turn Left-Right", Mathf.Sin(phase - 0.5f) * gait.Look);
+        AddMuscle(rig, "Head Nod Down-Up", Mathf.Sin(phase * 2f + 0.7f) * gait.Look * 0.35f);
+        AddDegrees(rig, "Chest Front-Back", -gait.ChestArch * 0.5f);
+        AddDegrees(rig, "UpperChest Front-Back", -gait.ChestArch * 0.5f);
+        AddDegrees(rig, "Head Nod Down-Up", -gait.HeadRaise);
+
+        var pelvis = Quaternion.AngleAxis(Mathf.Sin(phase) * gait.PelvisYaw, Vector3.up)
+                     * Quaternion.AngleAxis(Mathf.Cos(phase) * gait.PelvisRoll, Vector3.forward);
+        rig.Pose.bodyRotation = pelvis * rig.Pose.bodyRotation;
+
+        ApplyPose(rig);
+        if (!float.IsNaN(gait.TorsoTilt))
+        {
+            LeanTorso(rig, gait.TorsoTilt);
+        }
+
+        // Mantém o pé mais baixo no chão, para o agachado descer em vez de levantar os pés. O peso
+        // passa para o pé de apoio, e o corpo sobe no meio de cada passo.
+        if (rig.Hips != null)
+        {
+            var root = rig.Animator.transform;
+            var bob = gait.Bob * rig.HipHeight * (0.5f + 0.5f * Mathf.Cos(phase * 2f));
+            var height = rig.RestFootHeight - FootHeight(rig, gait.FootBlend) + gait.Lift + bob;
+            var sideways = Mathf.Cos(phase) * gait.Sway + Mathf.Sin(phase) * gait.Balance + Mathf.Sin(testMotionTime * 0.61f) * 0.006f * gait.Life;
+            rig.Hips.position += root.up * height + root.right * (sideways * rig.HipHeight);
+        }
+    }
+
+    // A coluna é um arco: a pelve inclina e os ossos acima repartem o resto por igual. As duas correções
+    // se alternam porque o bodyRotation é uma média do quadril com a coluna: dobrar a coluna para a frente
+    // gira o quadril para trás, e só medindo a própria pelve dá para evitar a quebra no meio das costas.
+    private static void LeanTorso(MotionRig rig, float target)
+    {
+        var leftThigh = ThighPitch(rig, HumanBodyBones.LeftUpperLeg, HumanBodyBones.LeftLowerLeg);
+        var rightThigh = ThighPitch(rig, HumanBodyBones.RightUpperLeg, HumanBodyBones.RightLowerLeg);
+        var pelvisTarget = rig.RestPelvisTilt + (target - rig.RestTilt) * PelvisShare;
+
+        var bendable = SpineMuscles.Where(muscle => Mathf.Abs(rig.MuscleRates[muscle]) >= MinimumRate).ToList();
+        for (var pass = 0; pass < SpinePasses; pass++)
+        {
+            if (Mathf.Abs(rig.BodyRate) >= 0.1f)
+            {
+                var pelvis = Mathf.DeltaAngle(PelvisTilt(rig), pelvisTarget) / rig.BodyRate;
+                rig.Pose.bodyRotation = Quaternion.AngleAxis(pelvis, Vector3.right) * rig.Pose.bodyRotation;
+                ApplyPose(rig);
+            }
+
+            var missing = target - TorsoTilt(rig);
+            foreach (var muscle in bendable)
+            {
+                AddMuscle(rig, muscle, missing / bendable.Count / rig.MuscleRates[muscle]);
+            }
+            ApplyPose(rig);
+        }
+
+        if (Mathf.Abs(rig.LegRate) >= MinimumRate)
+        {
+            AddMuscle(rig, "Left Upper Leg Front-Back", (leftThigh - ThighPitch(rig, HumanBodyBones.LeftUpperLeg, HumanBodyBones.LeftLowerLeg)) / rig.LegRate);
+            AddMuscle(rig, "Right Upper Leg Front-Back", (rightThigh - ThighPitch(rig, HumanBodyBones.RightUpperLeg, HumanBodyBones.RightLowerLeg)) / rig.LegRate);
+            ApplyPose(rig);
+        }
+
+        // A cabeça continua olhando para a frente, em vez de seguir o tronco para o chão.
+        var pitch = HeadPitch(rig);
+        var neck = NeckMuscles.Where(muscle => Mathf.Abs(rig.MuscleRates[muscle]) >= MinimumRate).ToList();
+        foreach (var muscle in neck)
+        {
+            AddMuscle(rig, muscle, -pitch / neck.Count / rig.MuscleRates[muscle]);
+        }
+        ApplyPose(rig);
+    }
+
+    private static void SetLeg(MotionRig rig, string side, float phase, Gait gait)
+    {
+        var lift = Lobe(phase);
+        AddMuscle(rig, side + " Upper Leg Front-Back", (Mathf.Sin(phase) * gait.Stride + gait.CrouchThigh + lift * gait.LegLift) * rig.LegForward);
+        AddMuscle(rig, side + " Upper Leg In-Out", gait.LegSpread * rig.LegOutward);
+        // O joelho dobra enquanto a perna volta para a frente, e nunca passa de esticado.
+        AddMuscle(rig, side + " Lower Leg Stretch", -(Lobe(phase + 1.2f) * gait.KneeSwing + gait.CrouchKnee + lift * gait.KneeLift));
+        // A canela inclinada leva o pé junto. Sem isso, ele fica na ponta e atravessa o chão.
+        var flat = Mathf.Clamp(gait.CrouchKnee - gait.CrouchThigh * 0.5f, 0f, 1f) * 0.6f;
+        AddMuscle(rig, side + " Foot Up-Down", (flat + Mathf.Sin(phase + 0.6f) * gait.FootRoll) * rig.ToesUp);
+    }
+
+    private static void SetArm(MotionRig rig, string side, float phase, Gait gait)
+    {
+        var swing = Mathf.Sin(phase);
+        var height = side + " Arm Down-Up";
+        var armsDown = ArmsDownMuscle / rig.BelowZero[MuscleIndex(height)] + gait.ArmRaise;
+        SetMuscle(rig, height, float.IsNaN(gait.ArmAngle) ? armsDown + swing * swing * gait.ArmSwing * 0.1f : ArmMuscle(rig, gait.ArmAngle + swing * gait.ArmAngleSwing));
+        AddMuscle(rig, side + " Arm Front-Back", (swing * gait.ArmSwing + gait.ArmReach) * rig.ArmForward);
+        AddMuscle(rig, side + " Shoulder Front-Back", (swing * gait.Shoulder - gait.ShoulderBack) * rig.ShoulderForward);
+        AddMuscle(rig, side + " Shoulder Down-Up", gait.ShoulderRaise);
+        // O antebraço e a mão chegam atrasados, e o cotovelo fecha mais na ida para a frente.
+        SetMuscle(rig, side + " Forearm Stretch", 1f - gait.Elbow - Lobe(phase - 0.4f) * gait.ElbowSwing);
+        AddMuscle(rig, side + " Hand Down-Up", Mathf.Sin(phase - 0.8f) * gait.ArmSwing * 0.4f);
+        for (var finger = 0; finger < Fingers.Length; finger++)
+        {
+            // O mindinho fecha mais que o indicador, como numa mão solta.
+            var curl = gait.FingerCurl * (0.7f + finger * 0.15f) + Mathf.Sin(phase + finger) * 0.04f;
+            for (var joint = 1; joint <= 3; joint++)
+            {
+                AddMuscle(rig, $"{side} {Fingers[finger]} {joint} Stretched", -curl);
+            }
+        }
+    }
+
+    // Ondas lentas com períodos que não se alinham, nem entre si nem com o ciclo: o corpo respira e olha
+    // em volta, e a animação nunca se repete inteira, então não há um ponto em que ela pareça recomeçar.
+    private void AddLife(MotionRig rig, Gait gait)
+    {
+        var breath = Mathf.Sin(testMotionTime * 1.7f) * gait.Life;
+        AddMuscle(rig, "Left Shoulder Down-Up", breath * 0.05f);
+        AddMuscle(rig, "Right Shoulder Down-Up", breath * 0.05f);
+        AddMuscle(rig, "UpperChest Front-Back", breath * 0.04f);
+        AddMuscle(rig, "Head Turn Left-Right", (Mathf.Sin(testMotionTime * 0.43f) + 0.5f * Mathf.Sin(testMotionTime * 1.03f)) * 0.12f * gait.Life);
+        AddMuscle(rig, "Head Nod Down-Up", Mathf.Sin(testMotionTime * 0.77f) * 0.06f * gait.Life);
+        AddMuscle(rig, "Head Tilt Left-Right", Mathf.Sin(testMotionTime * 0.53f) * 0.06f * gait.Life);
+        rig.Pose.bodyRotation = Quaternion.AngleAxis(Mathf.Sin(testMotionTime * 0.61f) * 1.2f * gait.Life, Vector3.forward) * rig.Pose.bodyRotation;
+    }
+
+    private static void AddDegrees(MotionRig rig, string name, float degrees)
+    {
+        if (rig.MuscleRates.TryGetValue(name, out var rate) && Mathf.Abs(rate) >= MinimumRate)
+        {
+            AddMuscle(rig, name, degrees / rate);
+        }
+    }
+
+    private static void AddMuscle(MotionRig rig, string name, float amount)
+    {
+        var index = MuscleIndex(name);
+        if (index >= 0)
+        {
+            rig.Pose.muscles[index] += amount;
+        }
+    }
+
+    // Achata aos poucos perto do limite. Um corte seco para o osso de repente no meio do ciclo.
+    private static float SoftLimit(float value)
+    {
+        var excess = Mathf.Abs(value) - SoftLimitStart;
+        if (excess <= 0f)
+        {
+            return value;
+        }
+        var room = 1f - SoftLimitStart;
+        return Mathf.Sign(value) * (SoftLimitStart + room * (1f - Mathf.Exp(-excess / room)));
+    }
+
+    private static void SetMuscle(MotionRig rig, string name, float value)
+    {
+        var index = MuscleIndex(name);
+        if (index >= 0)
+        {
+            rig.Pose.muscles[index] = value;
+        }
+    }
+
+    private static void RestoreMotionRig(MotionRig rig)
+    {
+        foreach (var bone in rig.Bones)
+        {
+            if (bone.Transform != null)
+            {
+                bone.Transform.localPosition = bone.LocalPosition;
+                bone.Transform.localRotation = bone.LocalRotation;
+            }
+        }
     }
 
     private void RestartSimulation()
     {
         RestoreAllChains();
         chains.Clear();
+        ClearPosedState();
         grabbedChain = null;
         simulatedBones.Clear();
         simulatedBones.UnionWith(physBones);
+        BuildMotionRigs();
+        BuildArmatureLinks();
+        var linkedProps = new HashSet<Transform>(linkedBones.Select(bone => bone.Prop));
         foreach (var bone in physBones)
         {
             var chain = BuildChain(bone);
             if (chain != null)
             {
+                for (var parent = chain.Root; parent != null && !chain.FollowsLink; parent = parent.parent)
+                {
+                    chain.FollowsLink = linkedProps.Contains(parent);
+                }
                 chains.Add(chain);
             }
         }
@@ -1344,6 +2723,11 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         foreach (var chain in chains)
         {
             RestoreChain(chain);
+        }
+        RestoreArmatureLinks();
+        foreach (var rig in motionRigs)
+        {
+            RestoreMotionRig(rig);
         }
     }
 
@@ -1391,6 +2775,8 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             }
         }
         chain.LastRootPosition = root.position;
+        var avatar = AvatarRoot(root);
+        chain.LastAvatarPosition = avatar != null ? avatar.position : root.position;
         return chain.Particles.Count > 1 ? chain : null;
     }
 
@@ -1453,6 +2839,11 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             return;
         }
+        if (chain.Posed)
+        {
+            HoldPose(chain);
+            return;
+        }
 
         // Volta à pose de repouso para ler a animação/movimento atual do avatar.
         foreach (var particle in chain.Particles)
@@ -1470,6 +2861,27 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
         var rootDelta = chain.Root.position - chain.LastRootPosition;
         chain.LastRootPosition = chain.Root.position;
+        // World: o Immobile só desconta o deslocamento do avatar, não o movimento do corpo.
+        var avatarTransform = AvatarRoot(chain.Root);
+        var avatarPosition = avatarTransform != null ? avatarTransform.position : chain.Root.position;
+        var avatarDelta = avatarPosition - chain.LastAvatarPosition;
+        chain.LastAvatarPosition = avatarPosition;
+        var immobileDelta = EnumField(bone, "immobileType") == 1 ? avatarDelta : rootDelta;
+        var usesStiffness = EnumField(bone, "integrationType") == 1;
+        var pullCurve = new BoneCurve(bone, "pull", "pullCurve");
+        var springCurve = new BoneCurve(bone, "spring", "springCurve");
+        var stiffnessCurve = new BoneCurve(bone, "stiffness", "stiffnessCurve");
+        var gravityCurve = new BoneCurve(bone, "gravity", "gravityCurve");
+        var falloffCurve = new BoneCurve(bone, "gravityFalloff", "gravityFalloffCurve");
+        var immobileCurve = new BoneCurve(bone, "immobile", "immobileCurve");
+        var radiusCurve = new BoneCurve(bone, "radius", "radiusCurve");
+        var maxAngleXCurve = new BoneCurve(bone, "maxAngleX", "maxAngleXCurve");
+        var maxAngleZCurve = new BoneCurve(bone, "maxAngleZ", "maxAngleZCurve");
+        var maxStretch = Mathf.Max(0f, Field(bone, "maxStretch", 0f));
+        var maxSquish = Mathf.Clamp01(Field(bone, "maxSquish", 0f));
+        var stretchMotion = Mathf.Clamp01(Field(bone, "stretchMotion", 0f));
+        var strongestStretch = 0f;
+        var strongestSquish = 0f;
         var limitType = EnumField(bone, "limitType");
         var limitRotation = Field(bone, "limitRotation", Vector3.zero);
         var collidersList = Field<IList>(bone, "colliders");
@@ -1501,19 +2913,19 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             var parent = chain.Particles[particle.Parent];
             var onGrabPath = grabPath != null && grabPath.Contains(i);
             var ratio = particle.Ratio;
-            var pull = Mathf.Clamp01(CurveValue(bone, "pull", "pullCurve", ratio));
-            var spring = Mathf.Clamp01(CurveValue(bone, "spring", "springCurve", ratio));
-            var stiffness = Mathf.Clamp01(CurveValue(bone, "stiffness", "stiffnessCurve", ratio));
-            var gravity = CurveValue(bone, "gravity", "gravityCurve", ratio);
-            var falloff = Mathf.Clamp01(CurveValue(bone, "gravityFalloff", "gravityFalloffCurve", ratio));
-            var immobile = Mathf.Clamp01(CurveValue(bone, "immobile", "immobileCurve", ratio));
-            var radius = CurveValue(bone, "radius", "radiusCurve", ratio) * MaxScale(particle.Transform);
+            var pull = Mathf.Clamp01(pullCurve.At(ratio));
+            var spring = Mathf.Clamp01(springCurve.At(ratio));
+            var stiffness = usesStiffness ? Mathf.Clamp01(stiffnessCurve.At(ratio)) : 0f;
+            var gravity = gravityCurve.At(ratio);
+            var falloff = Mathf.Clamp01(falloffCurve.At(ratio));
+            var immobile = Mathf.Clamp01(immobileCurve.At(ratio));
+            var radius = radiusCurve.At(ratio) * MaxScale(particle.Transform);
 
             // Immobile: parte do movimento da raiz é carregada sem inércia.
             if (!onGrabPath)
             {
-                particle.Position += rootDelta * immobile;
-                particle.PreviousPosition += rootDelta * immobile;
+                particle.Position += immobileDelta * immobile;
+                particle.PreviousPosition += immobileDelta * immobile;
             }
 
             var restDirection = particle.RestPosition - parent.RestPosition;
@@ -1530,12 +2942,15 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 ? Vector3.Slerp(restDirection, Vector3.down, hangAmount)
                 : Vector3.Slerp(restDirection, Vector3.up, -hangAmount);
             var goal = parent.Position + goalDirection * length;
+            // Só o arraste estica por inteiro; em movimento livre, vale a fração de Stretch Motion.
+            var longest = length * (1f + maxStretch * (onGrabPath ? 1f : stretchMotion));
+            var shortest = length * (1f - maxSquish);
 
             if (onGrabPath)
             {
                 // Caminho do osso agarrado: a pose vem do SolveGrabPath, sem inércia nem stiffness.
                 particle.PreviousPosition = particle.Position;
-                ConstrainLength(parent.Position, ref particle.Position, length);
+                ConstrainLength(parent.Position, ref particle.Position, shortest, longest);
                 chain.Grabbed |= i == grabbedParticle;
             }
             else
@@ -1545,14 +2960,17 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 particle.Position += velocity;
                 particle.Position += (goal - particle.Position) * Mathf.Lerp(0.02f, 0.6f, pull);
 
-                ConstrainLength(parent.Position, ref particle.Position, length);
+                ConstrainLength(parent.Position, ref particle.Position, shortest, longest);
 
-                var maxDeviation = length * (1f - stiffness) * 2f;
-                var deviation = particle.Position - goal;
-                if (deviation.magnitude > maxDeviation)
+                if (usesStiffness)
                 {
-                    particle.Position = goal + deviation.normalized * maxDeviation;
-                    ConstrainLength(parent.Position, ref particle.Position, length);
+                    var maxDeviation = length * (1f - stiffness) * 2f;
+                    var deviation = particle.Position - goal;
+                    if (deviation.magnitude > maxDeviation)
+                    {
+                        particle.Position = goal + deviation.normalized * maxDeviation;
+                        ConstrainLength(parent.Position, ref particle.Position, shortest, longest);
+                    }
                 }
             }
 
@@ -1561,19 +2979,32 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 var frame = parent.Virtual ? Quaternion.identity : parent.Transform.rotation;
                 var limitFrame = frame * Quaternion.Euler(limitRotation);
                 var limitDirection = limitFrame * Quaternion.Inverse(frame) * restDirection;
-                var maxX = CurveValue(bone, "maxAngleX", "maxAngleXCurve", ratio);
-                var maxZ = CurveValue(bone, "maxAngleZ", "maxAngleZCurve", ratio);
+                var maxX = maxAngleXCurve.At(ratio);
+                var maxZ = maxAngleZCurve.At(ratio);
+                var limbLength = Vector3.Distance(particle.Position, parent.Position);
                 var direction = ApplyLimit(limitType, particle.Position - parent.Position, limitDirection, limitFrame, maxX, maxZ);
-                particle.Position = parent.Position + direction.normalized * length;
+                particle.Position = parent.Position + direction.normalized * limbLength;
             }
 
             foreach (var shape in colliderShapes)
             {
                 PushOutOfCollider(shape, ref particle.Position, radius);
             }
-            ConstrainLength(parent.Position, ref particle.Position, length);
+            ConstrainLength(parent.Position, ref particle.Position, shortest, longest);
+
+            var currentLength = Vector3.Distance(particle.Position, parent.Position);
+            if (maxStretch > 0f)
+            {
+                strongestStretch = Mathf.Max(strongestStretch, Mathf.Clamp01((currentLength / length - 1f) / maxStretch));
+            }
+            if (maxSquish > 0f)
+            {
+                strongestSquish = Mathf.Max(strongestSquish, Mathf.Clamp01((1f - currentLength / length) / maxSquish));
+            }
         }
 
+        chain.Stretch = strongestStretch;
+        chain.Squish = strongestSquish;
         ApplyRotations(chain);
         var first = chain.Particles[0].Children.Count > 0 ? chain.Particles[chain.Particles[0].Children[0]] : null;
         if (first != null)
@@ -1619,8 +3050,92 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
     private static void ConstrainLength(Vector3 parent, ref Vector3 position, float length)
     {
+        ConstrainLength(parent, ref position, length, length);
+    }
+
+    private static void ConstrainLength(Vector3 parent, ref Vector3 position, float shortest, float longest)
+    {
         var offset = position - parent;
-        position = offset.sqrMagnitude > 1e-12f ? parent + offset.normalized * length : position;
+        var distance = offset.magnitude;
+        position = distance > 1e-6f ? parent + offset / distance * Mathf.Clamp(distance, shortest, longest) : position;
+    }
+
+    private void StartPose(Chain chain)
+    {
+        if (EnumField(chain.Bone, "allowPosing") == 0)
+        {
+            return;
+        }
+        chain.PoseOffsets.Clear();
+        chain.PoseOffsets.AddRange(chain.Particles.Select(particle => chain.Root.InverseTransformPoint(particle.Position)));
+        chain.Posed = true;
+    }
+
+    // A pose fica presa à raiz, como um osso posado acompanha quem o carrega.
+    private static void HoldPose(Chain chain)
+    {
+        foreach (var particle in chain.Particles.Where(particle => !particle.Virtual))
+        {
+            particle.Transform.localPosition = particle.RestLocalPosition;
+            particle.Transform.localRotation = particle.RestLocalRotation;
+        }
+        for (var i = 0; i < chain.Particles.Count; i++)
+        {
+            chain.Particles[i].Position = chain.Root.TransformPoint(chain.PoseOffsets[i]);
+        }
+        ApplyRotations(chain);
+    }
+
+    // Sem o SDK ou o Unity gráfico não há como ver o arraste, mas a matemática e a restauração podem ser conferidas.
+    public static void RunAutomatedValidation()
+    {
+        var failures = new List<string>();
+        void Check(string name, bool passed)
+        {
+            if (!passed)
+            {
+                failures.Add(name);
+            }
+        }
+
+        Vector3 CheckLength(float distance, float shortest, float longest)
+        {
+            var position = new Vector3(distance, 0f, 0f);
+            ConstrainLength(Vector3.zero, ref position, shortest, longest);
+            return position;
+        }
+        Check("length keeps values inside the range", Mathf.Approximately(CheckLength(1f, 0.5f, 2f).x, 1f));
+        Check("length clamps to the longest", Mathf.Approximately(CheckLength(3f, 0.5f, 2f).x, 2f));
+        Check("length clamps to the shortest", Mathf.Approximately(CheckLength(0.1f, 0.5f, 2f).x, 0.5f));
+
+        var limited = ApplyLimit(1, new Vector3(1f, 0f, 1f), Vector3.forward, Quaternion.identity, 10f, 10f);
+        Check("angle limit", Mathf.Abs(Vector3.Angle(limited, Vector3.forward) - 10f) < 0.1f);
+
+        var outside = new Vector3(0.5f, 0f, 0f);
+        PushOutOfCollider(new Shape { Kind = 0, Center = Vector3.zero, Rotation = Quaternion.identity, Radius = 1f }, ref outside, 0.1f);
+        Check("collider push", Mathf.Abs(outside.magnitude - 1.1f) < 0.001f);
+
+        var curve = new BoneCurve(null, "pull", "pullCurve") { Value = 2f, Curve = AnimationCurve.Linear(0f, 0f, 1f, 1f) };
+        Check("curves multiply the value", Mathf.Approximately(curve.At(0.5f), 1f));
+
+        foreach (var muscle in SpineMuscles.Concat(NeckMuscles).Concat(new[] { "Left Shoulder Front-Back", "Left Hand Down-Up", "Chest Twist Left-Right", "UpperChest Twist Left-Right", "Spine Twist Left-Right", "Neck Turn Left-Right", "Left Upper Leg Front-Back", "Right Lower Leg Stretch", "Left Foot Up-Down", "Left Arm Down-Up", "Left Arm Front-Back", "Right Forearm Stretch" }))
+        {
+            Check("Muscle " + muscle, MuscleIndex(muscle) >= 0);
+        }
+
+        ResolveTypes();
+        Check("SDK types resolve", physBoneType != null && contactType != null && constraintType != null);
+        foreach (var field in new[] { "immobileType", "integrationType", "maxStretch", "maxSquish", "stretchMotion", "allowPosing", "multiChildType" })
+        {
+            Check("PhysBone field " + field, physBoneType == null || GetField(physBoneType, field) != null);
+        }
+
+        if (failures.Count > 0)
+        {
+            Debug.LogError("VRC preview validation failed: " + string.Join("; ", failures));
+            return;
+        }
+        Debug.Log(ValidationOk);
     }
 
     private static Vector3 ApplyLimit(int limitType, Vector3 direction, Vector3 limitDirection, Quaternion frame, float maxX, float maxZ)
@@ -1902,13 +3417,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                     var frame = parent.Transform.rotation;
                     var limitFrame = frame * Quaternion.Euler(limitRotation);
                     var direction = limitFrame * Quaternion.Inverse(frame) * restDirection.normalized;
-                    var maxX = CurveValue(bone, "maxAngleX", "maxAngleXCurve", particle.Ratio);
-                    var maxZ = limitType == 3 ? CurveValue(bone, "maxAngleZ", "maxAngleZCurve", particle.Ratio) : maxX;
+                    var maxX = new BoneCurve(bone, "maxAngleX", "maxAngleXCurve").At(particle.Ratio);
+                    var maxZ = limitType == 3 ? new BoneCurve(bone, "maxAngleZ", "maxAngleZCurve").At(particle.Ratio) : maxX;
                     DrawLimit(limitType, parentPosition, direction, limitFrame, restDirection.magnitude * 0.6f, maxX, maxZ);
                 }
             }
 
-            var radius = CurveValue(bone, "radius", "radiusCurve", particle.Ratio) * MaxScale(particle.Transform);
+            var radius = new BoneCurve(bone, "radius", "radiusCurve").At(particle.Ratio) * MaxScale(particle.Transform);
             if (radius > 1e-4f)
             {
                 Handles.color = WithOpacity(color, 0.5f);
@@ -1993,12 +3508,17 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
         if (hitChain != null)
         {
+            hitChain.Posed = false;
             grabbedChain = hitChain;
             grabbedParticle = hitIndex;
             grabbedPosition = hitPosition;
         }
         else if (GUIUtility.hotControl == 0)
         {
+            if (grabbedChain != null && poseOnRelease)
+            {
+                StartPose(grabbedChain);
+            }
             grabbedChain = null;
             grabbedParticle = -1;
         }

@@ -1,13 +1,20 @@
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using DoskerTools.EditorUi;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Debug = UnityEngine.Debug;
+using Object = UnityEngine.Object;
+using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 {
-    private const string ProjectVersion = "0.5.0";
     private const int FirstUserLayer = 8;
     private const string SceneAsset = "Assets/ShaderView/ShaderViewPreview.unity";
     private const string MaterialAsset = "Assets/ShaderView/Materials/Center 1.mat";
@@ -16,7 +23,20 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
     private const string TestObjectName = "Shader under test / ScreenSpace Ubershader";
     private static readonly string[] VrAspectLabels = { "1:1", "4:3", "16:9", "21:9" };
     private static readonly float[] VrAspectRatios = { 1f, 4f / 3f, 16f / 9f, 21f / 9f };
-    private static readonly string[] TabLabels = { "Debugger", "IF pimax" };
+    private static readonly string[] TabLabels = { "Debugger", "Estéreo" };
+    private const string SettingsFile = "ShaderView";
+    private static readonly string[] AmbientLabels = { "Da cena", "Sem luz ambiente", "Noite", "Dia" };
+    private static readonly Color[] AmbientColors = { Color.clear, Color.black, new Color(0.05f, 0.06f, 0.1f), new Color(0.75f, 0.78f, 0.82f) };
+    private static readonly Regex VrChatGlobal = new Regex(@"_VRChat\w+", RegexOptions.Compiled);
+
+    // Valores aproximados por faixa de FOV. Não representam a óptica de um modelo específico.
+    private static readonly (string label, float fov, float ipd, float cant, float asymmetry)[] StereoPresets =
+    {
+        ("Estreito (≈90°)", 90f, 0.063f, 0f, 0.04f),
+        ("Comum (≈105°)", 105f, 0.064f, 0f, 0.06f),
+        ("Amplo (≈125°)", 125f, 0.064f, 5f, 0.08f),
+        ("Ultra-amplo inclinado (≈150°)", 150f, 0.064f, 10f, 0.12f),
+    };
 
     // Globais que o cliente do VRChat define: ver creators.vrchat.com, "VRChat Shader Globals".
     private static readonly int MirrorModeId = Shader.PropertyToID("_VRChatMirrorMode");
@@ -32,6 +52,64 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
     private static readonly int SimulatedCameraCenterId = Shader.PropertyToID("_ShaderView_SimulatedCameraCenter");
     private const string OverlayVisibilityProperty = "Global_Overlay_Visibility";
     private const int CameraMaskUi = 0x20;
+
+    [Serializable]
+    private sealed class CustomGlobal
+    {
+        public string Name = "";
+        public float Value;
+    }
+
+    // O que define uma captura. Fica em UserSettings, por usuário e fora da cena.
+    [Serializable]
+    private sealed class CaptureProfile
+    {
+        public string Name = "";
+        public int StationCount = 10;
+        public float FirstDistance = 1f;
+        public float IntervalMeters = 1f;
+        public float VerticalFov = 90f;
+        public int VrAspectIndex = 2;
+        public float CameraHeightOffset = 0.35f;
+        public float OrbitAngleDegrees;
+        public float EyeSeparationMeters = 0.064f;
+        public float ConvergenceDistanceMeters = 3f;
+        public float PreviewImageHeight = 300f;
+        public int MonoColumns = 4;
+        public bool AutoRefresh = true;
+        public int RefreshRate;
+        public bool SimulatedVr;
+        public bool SimulatedMirror;
+        public bool SimulatedPersonalMirror;
+        public bool SimulatedCameraUi;
+        public int SimulatedCameraMode;
+        public int SimulatedEyeIndex;
+        public int SimulatedScreenHeight = 1080;
+        public float PimaxVerticalFov = 110f;
+        public int PimaxAspectIndex = 2;
+        public float PimaxEyeCantDegrees = 5f;
+        public float PimaxProjectionAsymmetry = 0.06f;
+        public int Ambient;
+        public List<CustomGlobal> CustomGlobals = new List<CustomGlobal>();
+    }
+
+    [Serializable]
+    private sealed class SavedSettings
+    {
+        public CaptureProfile Current = new CaptureProfile();
+        public List<CaptureProfile> Presets = new List<CaptureProfile>();
+    }
+
+    private static List<CustomGlobal> activeCustomGlobals = new List<CustomGlobal>();
+
+    private SavedSettings savedSettings;
+    private List<CustomGlobal> customGlobals = new List<CustomGlobal>();
+    private bool temporarySettings;
+    private string presetName = "";
+    private int ambient;
+    private double lastCaptureMilliseconds;
+    private string shaderGlobalsText = "";
+    private Shader shaderGlobalsFor;
 
     private readonly List<CameraStation> stations = new List<CameraStation>();
     private GameObject targetObject;
@@ -92,9 +170,15 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         private readonly float simulatedVr;
         private readonly float simulatedEyeIndex;
         private readonly Vector4 simulatedCameraCenter;
+        private readonly List<(int id, float value)> customValues;
 
         public ShaderContextState()
         {
+            customValues = activeCustomGlobals
+                .Where(global => !string.IsNullOrWhiteSpace(global.Name))
+                .Select(global => Shader.PropertyToID(global.Name.Trim()))
+                .Select(id => (id, Shader.GetGlobalFloat(id)))
+                .ToList();
             mirrorMode = Shader.GetGlobalFloat(MirrorModeId);
             mirrorCameraPos = Shader.GetGlobalVector(MirrorCameraPosId);
             faceMirrorMode = Shader.GetGlobalFloat(FaceMirrorModeId);
@@ -107,6 +191,10 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
         public void Restore()
         {
+            foreach (var (id, value) in customValues)
+            {
+                Shader.SetGlobalFloat(id, value);
+            }
             Shader.SetGlobalFloat(MirrorModeId, mirrorMode);
             Shader.SetGlobalVector(MirrorCameraPosId, mirrorCameraPos);
             Shader.SetGlobalFloat(FaceMirrorModeId, faceMirrorMode);
@@ -149,18 +237,112 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
     [MenuItem("Tools/Dosker Tools/ShaderView/VR Camera Debugger")]
     public static void OpenWindow()
     {
-        var window = GetWindow<ShaderViewVrDebuggerWindow>($"VR Camera Debugger v{ProjectVersion}");
+        var version = PackageInfo.FindForAssembly(typeof(ShaderViewVrDebuggerWindow).Assembly)?.version;
+        var window = GetWindow<ShaderViewVrDebuggerWindow>(version == null ? "VR Camera Debugger" : $"VR Camera Debugger v{version}");
         window.minSize = new Vector2(640f, 400f);
         window.FindDefaultAssets();
-        if (window.targetObject == null && !EditorApplication.isPlayingOrWillChangePlaymode)
-        {
-            window.OpenPreviewScene();
-        }
         window.Show();
+    }
+
+    [MenuItem("Tools/Dosker Tools/ShaderView/Validar (usa a cena de teste)")]
+    private static void RunValidationFromMenu()
+    {
+        if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+        {
+            RunAutomatedValidation();
+        }
+    }
+
+    private void LoadSettings()
+    {
+        savedSettings = DoskerSettings<SavedSettings>.Load(SettingsFile);
+        ApplyProfile(savedSettings.Current);
+    }
+
+    // A validação não pode depender nem sobrescrever o que o usuário salvou.
+    private void UseDefaultSettings()
+    {
+        temporarySettings = true;
+        ApplyProfile(new CaptureProfile());
+    }
+
+    private void SaveSettings()
+    {
+        if (temporarySettings)
+        {
+            return;
+        }
+        savedSettings.Current = CurrentProfile();
+        DoskerSettings<SavedSettings>.Save(SettingsFile, savedSettings);
+    }
+
+    private CaptureProfile CurrentProfile()
+    {
+        return new CaptureProfile
+        {
+            StationCount = stationCount,
+            FirstDistance = firstDistance,
+            IntervalMeters = intervalMeters,
+            VerticalFov = verticalFov,
+            VrAspectIndex = vrAspectIndex,
+            CameraHeightOffset = cameraHeightOffset,
+            OrbitAngleDegrees = orbitAngleDegrees,
+            EyeSeparationMeters = eyeSeparationMeters,
+            ConvergenceDistanceMeters = convergenceDistanceMeters,
+            PreviewImageHeight = previewImageHeight,
+            MonoColumns = monoColumns,
+            AutoRefresh = autoRefresh,
+            RefreshRate = refreshRate,
+            SimulatedVr = simulatedVr,
+            SimulatedMirror = simulatedMirror,
+            SimulatedPersonalMirror = simulatedPersonalMirror,
+            SimulatedCameraUi = simulatedCameraUi,
+            SimulatedCameraMode = simulatedCameraMode,
+            SimulatedEyeIndex = simulatedEyeIndex,
+            SimulatedScreenHeight = simulatedScreenHeight,
+            PimaxVerticalFov = pimaxVerticalFov,
+            PimaxAspectIndex = pimaxAspectIndex,
+            PimaxEyeCantDegrees = pimaxEyeCantDegrees,
+            PimaxProjectionAsymmetry = pimaxProjectionAsymmetry,
+            Ambient = ambient,
+            CustomGlobals = customGlobals.Select(global => new CustomGlobal { Name = global.Name, Value = global.Value }).ToList(),
+        };
+    }
+
+    private void ApplyProfile(CaptureProfile profile)
+    {
+        stationCount = profile.StationCount;
+        firstDistance = profile.FirstDistance;
+        intervalMeters = profile.IntervalMeters;
+        verticalFov = profile.VerticalFov;
+        vrAspectIndex = profile.VrAspectIndex;
+        cameraHeightOffset = profile.CameraHeightOffset;
+        orbitAngleDegrees = profile.OrbitAngleDegrees;
+        eyeSeparationMeters = profile.EyeSeparationMeters;
+        convergenceDistanceMeters = profile.ConvergenceDistanceMeters;
+        previewImageHeight = profile.PreviewImageHeight;
+        monoColumns = profile.MonoColumns;
+        autoRefresh = profile.AutoRefresh;
+        refreshRate = profile.RefreshRate;
+        simulatedVr = profile.SimulatedVr;
+        simulatedMirror = profile.SimulatedMirror;
+        simulatedPersonalMirror = profile.SimulatedPersonalMirror;
+        simulatedCameraUi = profile.SimulatedCameraUi;
+        simulatedCameraMode = profile.SimulatedCameraMode;
+        simulatedEyeIndex = profile.SimulatedEyeIndex;
+        simulatedScreenHeight = profile.SimulatedScreenHeight;
+        pimaxVerticalFov = profile.PimaxVerticalFov;
+        pimaxAspectIndex = profile.PimaxAspectIndex;
+        pimaxEyeCantDegrees = profile.PimaxEyeCantDegrees;
+        pimaxProjectionAsymmetry = profile.PimaxProjectionAsymmetry;
+        ambient = profile.Ambient;
+        customGlobals = profile.CustomGlobals.Select(global => new CustomGlobal { Name = global.Name, Value = global.Value }).ToList();
     }
 
     private void OnEnable()
     {
+        wantsMouseMove = true;
+        LoadSettings();
         FindDefaultAssets();
         captureRequested = CanCapture();
         SceneView.duringSceneGui += DrawCameraPositions;
@@ -170,6 +352,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
     private void OnDisable()
     {
+        SaveSettings();
         SceneView.duringSceneGui -= DrawCameraPositions;
         SceneView.duringSceneGui -= HandleSceneViewRepaint;
         EditorApplication.update -= HandleEditorUpdate;
@@ -315,6 +498,11 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 string.Format("{0} / {1} capturas{2}", stations.Count, stationCount, autoRefresh ? " · contínua" : string.Empty),
                 complete ? DoskerEditorUi.Green : DoskerEditorUi.Yellow,
                 16f);
+            if (lastCaptureMilliseconds > 0.0)
+            {
+                GUILayout.Space(6f);
+                GUILayout.Label(string.Format("{0:0.0} ms · {1:0} MB", lastCaptureMilliseconds, CaptureMemoryMegabytes()), EditorStyles.miniLabel);
+            }
             GUILayout.FlexibleSpace();
             if (GUILayout.Button(DoskerEditorUi.Content(" Abrir cena de teste", "SceneAsset Icon"), EditorStyles.toolbarButton))
             {
@@ -328,6 +516,83 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                     Selection.activeGameObject = targetObject;
                     EditorGUIUtility.PingObject(targetObject);
                 }
+            }
+        }
+    }
+
+    private float CaptureMemoryMegabytes()
+    {
+        // RGBA8 mais depth de 32 bits, sem contar mipmaps.
+        var pixels = stations.Where(station => station.Image != null).Sum(station => (long)station.Image.width * station.Image.height);
+        return pixels * 8L / (1024f * 1024f);
+    }
+
+    private void DrawProfilesCard()
+    {
+        using (var card = new DoskerEditorUi.CardScope("Debugger.Profiles", "Perfis e globais", "SaveAs", DoskerEditorUi.Purple, defaultExpanded: false))
+        {
+            if (!card.Expanded)
+            {
+                return;
+            }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                presetName = EditorGUILayout.TextField(presetName);
+                using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(presetName)))
+                {
+                    if (GUILayout.Button("Salvar", GUILayout.Width(60f)))
+                    {
+                        var profile = CurrentProfile();
+                        profile.Name = presetName.Trim();
+                        savedSettings.Presets.RemoveAll(existing => existing.Name == profile.Name);
+                        savedSettings.Presets.Add(profile);
+                    }
+                }
+            }
+            foreach (var preset in savedSettings.Presets.ToList())
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button(preset.Name, EditorStyles.linkLabel))
+                    {
+                        ApplyProfile(preset);
+                        captureRequested = true;
+                    }
+                    if (GUILayout.Button("Remover", EditorStyles.miniButton, GUILayout.Width(60f)))
+                    {
+                        savedSettings.Presets.Remove(preset);
+                    }
+                }
+            }
+
+            EditorGUILayout.Space(4f);
+            var nextAmbient = EditorGUILayout.Popup("Luz ambiente", ambient, AmbientLabels);
+            if (nextAmbient != ambient)
+            {
+                ambient = nextAmbient;
+                captureRequested = true;
+            }
+
+            EditorGUILayout.LabelField("Globais extras, aplicadas só durante a captura", EditorStyles.miniLabel);
+            foreach (var global in customGlobals.ToList())
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUI.BeginChangeCheck();
+                    global.Name = EditorGUILayout.TextField(global.Name);
+                    global.Value = EditorGUILayout.FloatField(global.Value, GUILayout.Width(60f));
+                    captureRequested |= EditorGUI.EndChangeCheck();
+                    if (GUILayout.Button("×", EditorStyles.miniButton, GUILayout.Width(22f)))
+                    {
+                        customGlobals.Remove(global);
+                        captureRequested = true;
+                    }
+                }
+            }
+            if (GUILayout.Button("Adicionar global"))
+            {
+                customGlobals.Add(new CustomGlobal());
             }
         }
     }
@@ -495,6 +760,23 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         }
     }
 
+    // Só o arquivo principal: includes não entram, então a lista pode estar incompleta.
+    private string ShaderGlobalsText(Shader shader)
+    {
+        if (shader != shaderGlobalsFor)
+        {
+            shaderGlobalsFor = shader;
+            var assetPath = AssetDatabase.GetAssetPath(shader);
+            var names = File.Exists(assetPath)
+                ? VrChatGlobal.Matches(File.ReadAllText(assetPath)).Cast<Match>().Select(match => match.Value).Distinct().OrderBy(name => name).ToList()
+                : new List<string>();
+            shaderGlobalsText = names.Count == 0
+                ? "O arquivo do shader não cita globais do VRChat, então o contexto simulado pode não mudar nada."
+                : "O shader lê: " + string.Join(", ", names);
+        }
+        return shaderGlobalsText;
+    }
+
     private bool ShaderHasVrSimulation(Shader shader)
     {
         // A global não aparece nas propriedades do shader; só o fonte diz se ele a usa.
@@ -531,6 +813,16 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 captureRequested = true;
             }
 
+            using (new EditorGUI.DisabledScope(Selection.activeGameObject == null))
+            {
+                if (GUILayout.Button("Usar a seleção como alvo"))
+                {
+                    targetObject = Selection.activeGameObject;
+                    ResolveTargetMaterial();
+                    captureRequested = true;
+                }
+            }
+
             var nextMaterial = (Material)EditorGUILayout.ObjectField(
                 "Material no Inspector (opcional)",
                 material,
@@ -542,6 +834,11 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 materialManuallySelected = material != null;
                 ResolveTargetMaterial();
                 captureRequested = true;
+            }
+
+            if (material != null && material.shader != null)
+            {
+                EditorGUILayout.LabelField(ShaderGlobalsText(material.shader), EditorStyles.wordWrappedMiniLabel);
             }
 
             if (material == null)
@@ -563,6 +860,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 MessageType.None);
             DrawSelectMaterialButton();
         }
+        DrawProfilesCard();
     }
 
     private void DrawSelectMaterialButton()
@@ -654,7 +952,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 "É uma aproximação visual: não acessa o perfil óptico nem as matrizes reais do SteamVR/Pimax.",
                 MessageType.Warning);
             EditorGUILayout.EndScrollView();
-            DrawCaptureFooter("Capturar IF pimax");
+            DrawCaptureFooter("Capturar estéreo");
         }
     }
 
@@ -669,7 +967,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             }
             else
             {
-                EditorGUILayout.HelpBox("Configure o perfil e clique em Capturar IF pimax para gerar a imagem.", MessageType.None);
+                EditorGUILayout.HelpBox("Configure o perfil e clique em Capturar estéreo para gerar a imagem.", MessageType.None);
             }
             EditorGUILayout.EndScrollView();
         }
@@ -677,6 +975,16 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
     private void DrawPimaxSettings()
     {
+        var preset = EditorGUILayout.Popup("Faixa de FOV", -1, StereoPresets.Select(item => item.label).ToArray());
+        if (preset >= 0)
+        {
+            pimaxVerticalFov = StereoPresets[preset].fov;
+            eyeSeparationMeters = StereoPresets[preset].ipd;
+            pimaxEyeCantDegrees = StereoPresets[preset].cant;
+            pimaxProjectionAsymmetry = StereoPresets[preset].asymmetry;
+            captureRequested = true;
+        }
+
         EditorGUI.BeginChangeCheck();
         using (var card = new DoskerEditorUi.CardScope("Pimax.Target", "Alvo", "GameObject Icon", DoskerEditorUi.Cyan))
         {
@@ -854,9 +1162,38 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         Shader.SetGlobalFloat(SimulatedEyeIndexId, simulateVr ? eyeIndex : 0f);
         // Com a simulação ligada o centro é obrigatório: em (0,0,0) a distância sai errada e _MaxRange corta o efeito.
         Shader.SetGlobalVector(SimulatedCameraCenterId, simulateVr ? headCenter : Vector3.zero);
+
+        foreach (var global in customGlobals.Where(global => !string.IsNullOrWhiteSpace(global.Name)))
+        {
+            Shader.SetGlobalFloat(global.Name.Trim(), global.Value);
+        }
     }
 
     private void CaptureAllStations()
+    {
+        // O ContextState de cada captura lê esta lista para restaurar os valores.
+        activeCustomGlobals = customGlobals;
+        var previousAmbient = (RenderSettings.ambientMode, RenderSettings.ambientLight);
+        if (ambient > 0)
+        {
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+            RenderSettings.ambientLight = AmbientColors[ambient];
+        }
+
+        var timer = Stopwatch.StartNew();
+        try
+        {
+            CaptureCurrentTab();
+        }
+        finally
+        {
+            RenderSettings.ambientMode = previousAmbient.ambientMode;
+            RenderSettings.ambientLight = previousAmbient.ambientLight;
+        }
+        lastCaptureMilliseconds = timer.Elapsed.TotalMilliseconds;
+    }
+
+    private void CaptureCurrentTab()
     {
         if (selectedTab == 1)
         {
@@ -924,7 +1261,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         {
             if (CapturePimaxPreview())
             {
-                captureStatus = "Captura concluída: os dois olhos IF pimax foram renderizados em uma única imagem.";
+                captureStatus = "Captura concluída: os dois olhos foram renderizados em uma única imagem.";
             }
         }
         finally
@@ -1114,7 +1451,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         }
         if (sceneViewCamera == null)
         {
-            captureStatus = "Não há uma câmera de Scene View ativa para a prévia IF pimax.";
+            captureStatus = "Não há uma câmera de Scene View ativa para a prévia estéreo.";
             return false;
         }
 
@@ -1408,6 +1745,15 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         }
     }
 
+    // A validação também roda pelo menu, e ali o Editor precisa continuar aberto.
+    private static void ExitIfBatch()
+    {
+        if (Application.isBatchMode)
+        {
+            EditorApplication.Exit(0);
+        }
+    }
+
     public static void RunAutomatedValidation()
     {
         var shader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath(ShaderGuid));
@@ -1436,6 +1782,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
         var targetMaterial = GetFirstTargetMaterial(target);
         var debugger = CreateInstance<ShaderViewVrDebuggerWindow>();
+        debugger.UseDefaultSettings();
         if (!debugger.autoRefresh || debugger.refreshRate != 0)
         {
             throw new System.InvalidOperationException(
@@ -1502,7 +1849,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         DestroyImmediate(debugger);
 
         Debug.Log("SHADERVIEW_VALIDATION_OK: distance labels are concise; IF pimax renders distinguishable stereo eyes into one image with per-eye projection; automatic capture defaults on; orbit stations rotate through 90 and return at 360 degrees; simulated VR eye filters, head center and context exclusions work; Scene View VR eyes and ten mono stations render; reference depth is isolated and DepthLight settings are preserved.");
-        EditorApplication.Exit(0);
+        ExitIfBatch();
     }
 
     public static void RunMaterialResolutionValidation()
@@ -1518,6 +1865,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         var targetMaterial = new Material(shader) { name = "ShaderView target material validation" };
         var manualMaterial = new Material(shader) { name = "ShaderView manual material validation" };
         var debugger = CreateInstance<ShaderViewVrDebuggerWindow>();
+        debugger.UseDefaultSettings();
         try
         {
             renderer.sharedMaterial = targetMaterial;
@@ -1564,7 +1912,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         }
 
         Debug.Log("SHADERVIEW_MATERIAL_RESOLUTION_OK: renderer material fallback works, valid manual overrides are preserved, and capture has no separate material requirement.");
-        EditorApplication.Exit(0);
+        ExitIfBatch();
     }
 
     private static void AssertShaderSupportsDebugger(Shader shader)

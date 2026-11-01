@@ -1,0 +1,20 @@
+{
+  "name": "com.dosker.all",
+  "displayName": "Dosker Tools - Todas as ferramentas",
+  "version": "1.0.0",
+  "unity": "2022.3",
+  "description": "Instala todas as ferramentas de uma vez. O Compressor Exclusions tem licença não comercial e precisa do VRCFury.",
+  "author": {
+    "name": "Dosker",
+    "email": "6579456+sdosker@users.noreply.github.com",
+    "url": "https://github.com/sdosker"
+  },
+  "license": "SEE LICENSE IN LICENSE.md",
+  "vpmDependencies": {
+    "com.dosker.animation-audio-waveform": ">=0.7.0",
+    "com.dosker.compressor-exclusions": ">=1.2.0",
+    "com.dosker.performance-budget": ">=0.1.0",
+    "com.dosker.shader-view": ">=0.7.0",
+    "com.dosker.vrc-edit-mode-preview": ">=0.7.0"
+  }
+}

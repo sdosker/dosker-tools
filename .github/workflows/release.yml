@@ -7,6 +7,7 @@ on:
     paths:
       - "Packages/com.dosker.*/**"
       - "scripts/**"
+      - "tests/**"
       - ".github/workflows/release.yml"
   workflow_dispatch:
 
@@ -14,6 +15,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  attestations: write
 
 concurrency:
   group: release
@@ -31,8 +33,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Test
+        run: |
+          dotnet run --project tests/CompressorEstimator.Tests
+          python3 -m unittest discover -s tests -p "test_*.py"
+
       - name: Build packages
         run: python3 scripts/build_packages.py --out dist --repo "$GITHUB_REPOSITORY"
+
+      - name: Attest packages
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.zip
 
       - name: Release new versions
         run: |
@@ -47,7 +63,7 @@ jobs:
             fi
             gh release create "$tag" "dist/$base.zip" "$manifest" \
               --title "$name $version" \
-              --notes-file "Packages/$name/CHANGELOG.md" \
+              --notes-file "dist/$base.md" \
               --target "$GITHUB_SHA"
           done
 

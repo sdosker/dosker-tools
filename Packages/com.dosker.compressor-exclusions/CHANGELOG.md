@@ -10,6 +10,29 @@ Neste projeto, a versão muda assim:
 - **MINOR:** novo recurso compatível com a configuração existente.
 - **PATCH:** correção, incluindo adaptações a novas versões do VRCFury ou do SDK.
 
+## [1.2.0] - 2026-11-01
+
+### Adicionado
+
+- Cartão **Previsão do build**, com o próximo build, o que se previa para o último e o resultado real, separando parâmetros que mudaram de uma divergência do solver.
+- Antes do primeiro build, a janela mostra o avatar da cena, com a tabela e uma previsão parcial.
+- Padrões com `?`, `!` para liberar das regras gerais e `menu:` para usar o caminho no menu.
+- Botão **Fazer caber**, que sugere o menor conjunto de parâmetros a liberar.
+- Histórico de builds por avatar e plataforma.
+- Lote de cada parâmetro comprimido e explicação com todas as regras que valem para ele.
+- Avisos de PC e Quest diferentes, quando o solver roda em Quest, de nomes que colidem sem o prefixo do VRCFury e de VRCFury mais novo que o testado.
+- Botão para limpar escolhas de parâmetros que não existem mais.
+- Custo e estado do último build no tooltip do inspector.
+- Conferência do VRCFury ao carregar e relatório por `CompressorReport.Export`.
+
+### Corrigido
+
+- Quando o solver roda em Quest, o retrato não sobrescreve mais o de PC.
+- Um build que cabe sem compressão mantém a lista de parâmetros.
+- Parâmetros com largura de bits ou codificação especial não entram mais na estimativa, como no VRCFury.
+- Em batch mode, o build falha em vez de continuar sem as proteções.
+- O build avisa quando a configuração ainda não foi carregada, em vez de usar os valores padrão.
+
 ## [1.1.2] - 2026-10-31
 
 ### Removido

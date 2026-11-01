@@ -1,7 +1,7 @@
 {
   "name": "com.dosker.editor-ui",
   "displayName": "Dosker Tools - Editor UI",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "unity": "2022.3",
   "description": "Componentes de interface compartilhados pelas janelas do Dosker Tools.",
   "author": {

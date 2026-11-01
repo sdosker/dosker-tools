@@ -1,0 +1,43 @@
+name: Relatar um problema
+description: Algo não funciona como deveria em uma ferramenta do Dosker Tools
+labels: [bug]
+body:
+  - type: dropdown
+    id: package
+    attributes:
+      label: Ferramenta
+      options:
+        - ShaderView
+        - VRChat Edit-Mode Preview
+        - Animation Audio Waveform
+        - Compressor Exclusions
+        - Performance Budget
+        - Editor UI
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versões
+      description: Da ferramenta, do Unity, do VRChat SDK e do VRCFury, se usar.
+      placeholder: Compressor Exclusions 1.2.0, Unity 2022.3.22f1, SDK 3.10.6, VRCFury 1.1436.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Como reproduzir
+      placeholder: "1. Abra a janela...\n2. Clique em..."
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: O que aconteceu e o que deveria acontecer
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Erros do Console
+      render: text

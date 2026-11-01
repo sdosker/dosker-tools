@@ -4,7 +4,7 @@ using UnityEngine.UIElements;
 
 namespace CompressorExclusions {
     internal static class CompressorUi {
-        public const string Version = "1.1.2";
+        public const string Version = "1.2.0";
 
         private const string StyleSheetName = "CompressorExclusions";
 

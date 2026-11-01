@@ -50,7 +50,7 @@ Companion e instale este pacote no projeto.
   em vez de limitar a 1 FPS. Também é possível escolher 2, 5, 10, 15, 30 ou 60
   capturas por segundo. O seletor aparece em uma linha separada para manter o
   valor visível; as capturas não escrevem uma mensagem no Console a cada frame.
-- A aba **IF pimax** renderiza os dois olhos em uma única imagem lado a lado.
+- A aba **Estéreo** renderiza os dois olhos em uma única imagem lado a lado.
   FOV, proporção de cada olho, IPD, convergência, inclinação e assimetria da
   projeção podem ser ajustados para visualizar desalinhamentos estéreo. Essa
   aba captura somente a imagem estéreo Pimax; ela não dispara as câmeras mono
@@ -77,6 +77,21 @@ Companion e instale este pacote no projeto.
   refletem as alterações na frequência escolhida; sem ela, clique em
   **Capturar todas**.
 
+## Perfis, globais e custo
+
+- As configurações ficam em `UserSettings/ShaderView.json`. O cartão **Perfis e
+  globais** salva conjuntos com nome, para alternar entre testes.
+- **Luz ambiente** troca a luz ambiente só durante a captura.
+- **Globais extras** define floats globais só durante a captura, para shaders
+  que leem algo como AudioLink ou Light Volumes.
+- O cartão **Alvo** lista as globais do VRChat citadas no arquivo do shader.
+  Includes não entram nessa lista.
+- **Usar a seleção como alvo** aceita qualquer objeto. Só a cena de teste e a
+  validação dependem do `ScreenSpace Ubershader_D`.
+- A barra do topo mostra o tempo e a memória da última captura.
+- A aba **Estéreo** tem faixas de FOV aproximadas, que não representam um modelo
+  específico de headset.
+
 ## Limites da simulação
 
 O debugger define as mesmas globais que o cliente do VRChat — `_VRChatMirrorMode`,
@@ -91,7 +106,7 @@ a janela avisa quando está desligado ou quando o shader é anterior à simulaç
 - **Funciona:** espelho VR e desktop, olho no espelho VR, espelho pessoal,
   câmeras de mão, foto, classificações por resolução e visão principal em VR,
   com filtros por olho.
-- **Simulação de VR:** ligada na prévia VR, no IF pimax e, com **É VR**, nas
+- **Simulação de VR:** ligada na prévia VR, na aba Estéreo e, com **É VR**, nas
   câmeras mono, sempre fora de espelho, espelho pessoal, câmera de mão e foto.
   As câmeras comuns continuam com uma textura por olho; os ramos de aparência
   (UV do overlay, Boss Bar e aberração radial) seguem o caminho de Single Pass
@@ -109,10 +124,10 @@ Isso simula as ramificações do shader, mas não cria um runtime XR/VRChat: tem
 sincronizado, foveação e distorção óptica exigem o runtime e, para validação
 final, o headset correspondente.
 
-### IF pimax: escopo da simulação
+### Estéreo: escopo da simulação
 
 A projeção VR é específica por olho: o OpenVR fornece projeções brutas separadas
-e uma transformação de cada olho para a cabeça. A aba **IF pimax** reproduz
+e uma transformação de cada olho para a cabeça. A aba **Estéreo** reproduz
 visualmente essa estrutura com duas câmeras, frusta assimétricas, separação dos
 olhos e inclinação ajustável, compondo os resultados em uma textura única.
 Consulte a documentação da Valve para
@@ -150,7 +165,7 @@ Unity fechado para esse projeto:
 ```
 
 O teste verifica o `GrabPass` e as variáveis de simulação, renderiza a prévia
-estéreo da Scene View, a imagem lado a lado da aba **IF pimax** e dez câmeras
+estéreo da Scene View, a imagem lado a lado da aba **Estéreo** e dez câmeras
 mono em intervalos de 1 m; valida conteúdo/paralaxe, isolamento e configurações
 da DepthLight. Também verifica a captura automática em ritmo nativo, a rotação
 das câmeras em 360° e a simulação de VR: filtros por olho, corte por `_MaxRange`

@@ -191,11 +191,13 @@ public static class ShaderViewPreviewSetup
 
         var parent = Path.GetDirectoryName(path)?.Replace('\\', '/');
         var folder = Path.GetFileName(path);
-        if (string.IsNullOrEmpty(parent) || !AssetDatabase.IsValidFolder(parent))
+        if (string.IsNullOrEmpty(parent))
         {
-            throw new System.InvalidOperationException("Missing Unity asset parent folder: " + parent);
+            throw new System.InvalidOperationException("Invalid Unity asset folder: " + path);
         }
 
+        // Em um projeto novo, nem a pasta do ShaderView existe ainda.
+        EnsureAssetFolder(parent);
         AssetDatabase.CreateFolder(parent, folder);
     }
 }

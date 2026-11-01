@@ -103,10 +103,12 @@ namespace CompressorExclusions {
                 string tooltip;
                 string style;
                 if (enabled) {
-                    var control = CompressorSnapshotStore.ControlOf(paramName);
-                    var verdict = CompressorPolicy.Evaluate(settings, paramName, (ParamType)typeField.value, control);
+                    var known = CompressorSnapshotStore.Find(paramName);
+                    var control = known?.control ?? CompressorPolicy.NoControl;
+                    var verdict = CompressorPolicy.Evaluate(settings, paramName, (ParamType)typeField.value, control, known?.menuPath ?? "");
                     text = CompressorUi.ChoiceLabel(verdict.choice);
-                    tooltip = verdict.reason + "\nClique para alternar: Auto, Proteger, Comprimir.";
+                    tooltip = verdict.details + (known == null ? "" : LastBuildText(known))
+                              + "\nClique para alternar: Auto, Proteger, Comprimir.";
                     style = verdict.isProtected ? "ce-chip--protected" : "ce-chip--open";
                 } else {
                     text = "—";
@@ -128,6 +130,11 @@ namespace CompressorExclusions {
             button.userData = refresh;
             button.schedule.Execute(refresh).Every(RefreshIntervalMs);
             return refresh;
+        }
+
+        private static string LastBuildText(SnapshotParam param) {
+            var bits = param.cost > 0 ? param.cost : CompressorPolicy.CostOf((ParamType)param.valueType);
+            return $"\nÚltimo build: {bits} bits, {(param.compressed ? "comprimido" : "sincronizando direto")}.";
         }
 
         private static ParamChoice NextChoice(ParamChoice choice) {

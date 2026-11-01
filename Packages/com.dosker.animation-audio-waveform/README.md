@@ -18,8 +18,12 @@ liga ou desliga o painel.
   arrastar a playhead e andar frame a frame ficam em silêncio. A posição do som
   sempre deriva do tempo da animação menos o ponto de ativação; por isso loops,
   seeks e retomadas continuam sincronizados. Com **Tocar com a animação**
-  desligado, nada toca. Volume, pitch, loop e mixer vêm do AudioSource, sem
-  curvas animadas de volume.
+  desligado, nada toca. Volume, pitch, loop e mixer vêm do AudioSource. Uma curva
+  de volume do AudioSource no próprio clip é seguida; curvas de pitch não são.
+- **Escuta:** **S** deixa só uma faixa tocando, e **L** trava uma faixa manual
+  contra arrastes. **Som ao arrastar**, desligado por padrão, toca um trecho curto
+  ao arrastar a playhead neste painel. O campo **ms** adianta o som, para compensar
+  o atraso do fone ou da saída de áudio.
 - **Áudio 3D:** com **Áudio 3D (câmera)** ligado, cada faixa automática muda em
   tempo real conforme a câmera do Scene view (ou a `Camera.main`, sem Scene
   view) e o GameObject do AudioSource. A distância define o volume e a direção

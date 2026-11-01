@@ -1,0 +1,46 @@
+name: VRCFury compatibility
+
+# Compressor Exclusions patches VRCFury's private solver, so a change there can break the protections
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare with the reviewed version
+        id: check
+        run: |
+          set +e
+          report="$(python3 scripts/check_vrcfury.py)"
+          code=$?
+          set -e
+          echo "$report"
+          if [ "$code" -eq 2 ]; then
+            echo "report=$report" >> "$GITHUB_OUTPUT"
+          elif [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
+
+      - name: Open an issue
+        if: steps.check.outputs.report != ''
+        env:
+          REPORT: ${{ steps.check.outputs.report }}
+        run: |
+          title="VRCFury mudou arquivos usados pelo Compressor Exclusions"
+          if [ -n "$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number')" ]; then
+            echo "Already reported"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+            --body "$REPORT. Revise o patch e o estimador, depois registre com python scripts/check_vrcfury.py --update."

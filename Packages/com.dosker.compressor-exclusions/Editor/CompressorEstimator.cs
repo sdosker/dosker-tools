@@ -8,12 +8,14 @@ namespace CompressorExclusions {
         public bool isBool;
         public int control;
         public bool addDriven;
+        public bool nonStandardEncoding;
     }
 
     internal class EstimateResult {
         public bool needsCompression;
         public bool fits;
         public HashSet<string> compressed = new HashSet<string>();
+        public Dictionary<string, int> batchOf = new Dictionary<string, int>();
         public int numberSlots;
         public int boolSlots;
         public int batches;
@@ -22,6 +24,55 @@ namespace CompressorExclusions {
         public float MinDelay => batches * (BatchTime + (1 / 30f) * 0.5f);
         public float MaxDelay => MinDelay * 2;
         public const float BatchTime = 0.1f;
+    }
+
+    /**
+     * What a build is expected to do. Saved in the snapshot before the solver runs, so it can be compared with
+     * the real result afterwards. Names are normalized, because VRCFury's prefix changes between builds.
+     */
+    [Serializable]
+    internal class Prediction {
+        public bool available;
+        // Built from the avatar in the scene, without the parameters VRCFury only creates during a build
+        public bool partial;
+        public int compressed;
+        public int protectedCount;
+        public int batches;
+        public int cost;
+        public bool fits;
+        public float minDelay;
+        public float maxDelay;
+        public List<string> compressedNames = new List<string>();
+
+        public static Prediction From(EstimateResult estimate, int protectedCount, Func<string, string> normalize, bool partial = false) {
+            return new Prediction {
+                available = true,
+                partial = partial,
+                compressed = estimate.compressed.Count,
+                protectedCount = protectedCount,
+                batches = estimate.batches,
+                cost = estimate.finalCost,
+                fits = estimate.fits,
+                minDelay = estimate.batches > 0 ? estimate.MinDelay : 0,
+                maxDelay = estimate.batches > 0 ? estimate.MaxDelay : 0,
+                compressedNames = estimate.compressed.Select(normalize).OrderBy(name => name).ToList()
+            };
+        }
+    }
+
+    internal enum ForecastOutcome {
+        NoPrediction,
+        Match,
+        // The saved prediction used the previous build's parameters, and those changed. The solver copy is fine.
+        ParametersChanged,
+        // Even with the build's own parameters the result differs, so CompressorEstimator needs an update
+        SolverDiverged
+    }
+
+    internal class ForecastReport {
+        public ForecastOutcome outcome;
+        public List<string> unexpected = new List<string>();
+        public List<string> notCompressed = new List<string>();
     }
 
     /**
@@ -61,6 +112,7 @@ namespace CompressorExclusions {
             var bestTime = 0f;
             foreach (var (label, controls) in Attempts) {
                 var eligible = candidates
+                    .Where(p => !p.nonStandardEncoding)
                     .Where(p => controls.Contains(p.control))
                     .Where(p => !p.addDriven || controls.Contains(FourAxis))
                     .ToList();
@@ -86,10 +138,93 @@ namespace CompressorExclusions {
                 output.boolSlots = decision.boolSlots;
                 output.attempt = label;
                 output.compressed = new HashSet<string>(eligible.Select(p => p.name));
+                output.batchOf = BatchesOf(eligible, decision);
 
                 if (bestWasSuccess && syncTime <= 1) break;
             }
             return output;
+        }
+
+        // Same order as OptimizationDecision.GetBatches: numbers and bools are chunked separately
+        private static Dictionary<string, int> BatchesOf(IEnumerable<EstimatorParam> eligible, Decision decision) {
+            var output = new Dictionary<string, int>();
+            var numbers = 0;
+            var bools = 0;
+            foreach (var param in eligible) {
+                output[param.name] = param.isBool ? bools++ / decision.boolSlots : numbers++ / decision.numberSlots;
+            }
+            return output;
+        }
+
+        /**
+         * The smallest set of protected parameters to release so that the avatar fits, or null if it can't.
+         * Numbers come first, because each one saves 8 bits against 1 for a Bool.
+         */
+        public static List<string> SuggestRelease(
+            IList<EstimatorParam> candidates,
+            IList<EstimatorParam> protectedParams,
+            int originalCost,
+            int maxCost
+        ) {
+            if (Solve(candidates, originalCost, maxCost).fits) return new List<string>();
+
+            var compressible = Attempts.SelectMany(attempt => attempt.controls).ToHashSet();
+            var released = new List<EstimatorParam>();
+            var fits = false;
+            foreach (var param in protectedParams.Where(p => !p.nonStandardEncoding && compressible.Contains(p.control)).OrderBy(p => p.isBool)) {
+                released.Add(param);
+                if (Solve(candidates.Concat(released).ToList(), originalCost, maxCost).fits) {
+                    fits = true;
+                    break;
+                }
+            }
+            if (!fits) return null;
+
+            foreach (var param in released.ToList()) {
+                var without = released.Where(other => other.name != param.name);
+                if (Solve(candidates.Concat(without).ToList(), originalCost, maxCost).fits) {
+                    released.Remove(param);
+                }
+            }
+            return released.Select(p => p.name).ToList();
+        }
+
+        /**
+         * before: what was predicted with the previous build's parameters. Can be missing on a first build.
+         * atBuild: what was predicted with this build's own parameters.
+         */
+        public static ForecastReport Compare(
+            Prediction before,
+            Prediction atBuild,
+            IEnumerable<string> actualNames,
+            int actualBatches,
+            int actualCost,
+            bool actualFits
+        ) {
+            var actual = new HashSet<string>(actualNames);
+            bool Matches(Prediction prediction) {
+                // When it doesn't fit, VRCFury gives up, so there is no compressed list to compare
+                if (!prediction.fits && !actualFits) return true;
+                return prediction.fits == actualFits
+                       && prediction.batches == actualBatches
+                       && prediction.cost == actualCost
+                       && actual.SetEquals(prediction.compressedNames);
+            }
+
+            var report = new ForecastReport();
+            if (!before.available && !atBuild.available) {
+                report.outcome = ForecastOutcome.NoPrediction;
+                return report;
+            }
+
+            var shown = before.available ? before : atBuild;
+            report.unexpected = actual.Except(shown.compressedNames).OrderBy(name => name).ToList();
+            report.notCompressed = shown.compressedNames.Except(actual).OrderBy(name => name).ToList();
+
+            if (atBuild.available && !Matches(atBuild)) report.outcome = ForecastOutcome.SolverDiverged;
+            else if (Matches(shown)) report.outcome = ForecastOutcome.Match;
+            else report.outcome = atBuild.available ? ForecastOutcome.ParametersChanged : ForecastOutcome.SolverDiverged;
+            return report;
         }
 
         private class Decision {

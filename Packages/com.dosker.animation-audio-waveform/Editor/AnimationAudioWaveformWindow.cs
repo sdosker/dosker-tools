@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using UnityEditor;
@@ -66,6 +67,12 @@ public sealed class AnimationAudioWaveformWindow : EditorWindow
 
     private void OnGUI()
     {
+        var unavailable = AnimationAudioHarmonyPatch.UnavailableReason;
+        if (unavailable != null)
+        {
+            EditorGUILayout.HelpBox("Janela separada: " + unavailable, MessageType.None);
+        }
+
         var animationWindow = AnimationWindowBridge.FindTargetWindow();
         if (animationWindow == null)
         {
@@ -296,6 +303,7 @@ internal sealed class AnimationAudioManualTrack
     public bool visible = true;
     public bool play = true;
     public Color color;
+    public bool locked;
 }
 
 [Serializable]
@@ -328,6 +336,8 @@ internal sealed class AnimationAudioSettings
     public bool playbackEnabled = true;
     public bool falloffEnabled = true;
     public float panelHeight = 170f;
+    public bool scrubAudio;
+    public float latencyMilliseconds;
     public List<AnimationAudioClipEntry> clips = new List<AnimationAudioClipEntry>();
 
     public static AnimationAudioSettings Instance
@@ -406,6 +416,7 @@ internal sealed class AnimationAudioTrack
     public AudioClip Clip;
     public AudioSource Source;
     public float Volume = 1f;
+    public AnimationCurve VolumeCurve;
     public float Pitch = 1f;
     public AudioMixerGroup Mixer;
     public bool Loop;
@@ -436,6 +447,11 @@ internal sealed class AnimationAudioTrack
             var color = IsManual ? Manual.color : Override.color;
             return color.a > 0f ? color : AnimationAudioPanel.Palette[ColorIndex % AnimationAudioPanel.Palette.Length];
         }
+    }
+
+    public float VolumeAt(float time)
+    {
+        return VolumeCurve != null ? Mathf.Clamp01(VolumeCurve.Evaluate(time)) : Volume;
     }
 
     public float PlaybackRate
@@ -673,6 +689,7 @@ internal sealed class AnimationAudioModel
             trackOverride = entry.overrides.Find(item => item.key == key);
         }
 
+        var path = AnimationUtility.CalculateTransformPath(source.transform, Root.transform);
         return new AnimationAudioTrack
         {
             Key = key,
@@ -680,6 +697,7 @@ internal sealed class AnimationAudioModel
             Clip = source.clip,
             Source = source,
             Volume = source.volume,
+            VolumeCurve = AnimationUtility.GetEditorCurve(Clip, EditorCurveBinding.FloatCurve(path, typeof(AudioSource), "m_Volume")),
             Pitch = source.pitch,
             Mixer = source.outputAudioMixerGroup,
             Loop = source.loop,
@@ -967,6 +985,17 @@ internal sealed class AnimationAudioPeaks
         return peaks;
     }
 
+    public static bool Invalidate(string[] assetPaths)
+    {
+        var changed = new HashSet<string>(assetPaths);
+        var stale = Cache.Keys.Where(clip => clip == null || changed.Contains(AssetDatabase.GetAssetPath(clip))).ToList();
+        foreach (var clip in stale)
+        {
+            Cache.Remove(clip);
+        }
+        return stale.Count > 0;
+    }
+
     private static AnimationAudioPeaks ReadSamples(AudioClip clip)
     {
         var peaks = new AnimationAudioPeaks();
@@ -1072,6 +1101,18 @@ internal sealed class AnimationAudioPeaks
         {
             min = Mathf.Min(min, Min[bucket]);
             max = Mathf.Max(max, Max[bucket]);
+        }
+    }
+}
+
+// O áudio pode mudar sem o AudioClip mudar de instância, então a waveform precisa ser refeita.
+internal sealed class AnimationAudioPeaksInvalidator : AssetPostprocessor
+{
+    private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] movedFrom)
+    {
+        if (AnimationAudioPeaks.Invalidate(imported))
+        {
+            AnimationAudioPanel.InvalidateLanes();
         }
     }
 }
@@ -1252,8 +1293,14 @@ internal static class AnimationAudioPlayback
     private const float ResyncThreshold = 0.08f;
     private const float EndMargin = 0.03f;
     private const int RequiredContinuousTicks = 2;
+    private const double ScrubGrainSeconds = 0.12;
 
     private static readonly Dictionary<string, AudioSource> Voices = new Dictionary<string, AudioSource>();
+
+    // Só vale nesta sessão: é uma escuta rápida, não uma configuração do clip.
+    public static string SoloKey;
+
+    private static double scrubUntil;
 
     private static AnimationWindow trackedWindow;
     private static AnimationClip trackedClip;
@@ -1275,8 +1322,25 @@ internal static class AnimationAudioPlayback
         DestroyVoices();
     }
 
+    // Opcional: um trecho curto na posição da playhead. A posição continua vindo do tempo da animação.
+    public static void Scrub(AnimationAudioModel model, float time)
+    {
+        var settings = AnimationAudioSettings.Instance;
+        if (!settings.scrubAudio || !settings.playbackEnabled || EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            return;
+        }
+        Synchronize(model, time);
+        scrubUntil = EditorApplication.timeSinceStartup + ScrubGrainSeconds;
+    }
+
     private static void HandleEditorUpdate()
     {
+        if (EditorApplication.timeSinceStartup < scrubUntil)
+        {
+            return;
+        }
+
         var window = AnimationAudioSettings.Instance.playbackEnabled && !EditorApplication.isPlayingOrWillChangePlaymode
             ? AnimationWindowBridge.FindPlayingWindow()
             : null;
@@ -1353,15 +1417,17 @@ internal static class AnimationAudioPlayback
     private static void Synchronize(AnimationAudioModel model, float time)
     {
         var used = new HashSet<string>();
+        var heardTime = time + AnimationAudioSettings.Instance.latencyMilliseconds / 1000f;
         foreach (var track in model.Tracks)
         {
-            if (!track.Play || !track.TryGetPosition(time, out var position))
+            var silenced = SoloKey != null && SoloKey != track.Key;
+            if (!track.Play || silenced || !track.TryGetPosition(heardTime, out var position))
             {
                 continue;
             }
 
             used.Add(track.Key);
-            SynchronizeVoice(track, position);
+            SynchronizeVoice(track, position, time);
         }
 
         foreach (var pair in Voices)
@@ -1373,7 +1439,7 @@ internal static class AnimationAudioPlayback
         }
     }
 
-    private static void SynchronizeVoice(AnimationAudioTrack track, float position)
+    private static void SynchronizeVoice(AnimationAudioTrack track, float position, float time)
     {
         var voice = GetVoice(track.Key);
         if (voice.clip != track.Clip)
@@ -1383,7 +1449,7 @@ internal static class AnimationAudioPlayback
         }
 
         var mix = AnimationAudioFalloff.GetMix(track);
-        voice.volume = track.Volume * mix.Volume;
+        voice.volume = track.VolumeAt(time) * mix.Volume;
         voice.panStereo = mix.Pan;
         voice.pitch = track.PlaybackRate;
         voice.loop = track.Loop;
@@ -1606,6 +1672,28 @@ internal static class AnimationAudioPanel
             settings.Save();
         }
 
+        row.x = row.xMax;
+        row.width = 112f;
+        EditorGUI.BeginChangeCheck();
+        var scrubAudio = EditorGUI.ToggleLeft(row, new GUIContent("Som ao arrastar", "Toca um trecho curto ao arrastar a playhead neste painel."), settings.scrubAudio);
+        if (EditorGUI.EndChangeCheck())
+        {
+            settings.scrubAudio = scrubAudio;
+            settings.Save();
+        }
+
+        row.x = row.xMax;
+        row.width = 76f;
+        EditorGUI.BeginChangeCheck();
+        var latencyContent = new GUIContent("ms", "Compensa o atraso do fone ou da saída de áudio, adiantando o som.");
+        var latency = EditorGUI.FloatField(new Rect(row.x, row.y, 46f, row.height), settings.latencyMilliseconds, EditorStyles.miniTextField);
+        GUI.Label(new Rect(row.x + 48f, row.y, 26f, row.height), latencyContent, EditorStyles.miniLabel);
+        if (EditorGUI.EndChangeCheck())
+        {
+            settings.latencyMilliseconds = Mathf.Clamp(latency, 0f, 1000f);
+            settings.Save();
+        }
+
         row.x = row.xMax + 8f;
         row.width = 100f;
         GUI.Label(row, "Adicionar áudio");
@@ -1703,13 +1791,31 @@ internal static class AnimationAudioPanel
             model.SetColor(track, color);
         }
 
-        var removeWidth = track.IsManual ? 18f : 0f;
+        var removeWidth = track.IsManual ? 58f : 20f;
         GUI.Label(
             new Rect(rect.x + 22f, rect.y + 2f, rect.width - 26f - removeWidth, 18f),
             new GUIContent(track.Label, track.Clip.name),
             EditorStyles.miniLabel);
 
         var removed = track.IsManual && GUI.Button(new Rect(rect.xMax - 20f, rect.y + 3f, 16f, 16f), "×", EditorStyles.miniButton);
+
+        var soloRect = new Rect(rect.xMax - (track.IsManual ? 38f : 20f), rect.y + 3f, 16f, 16f);
+        var isSolo = AnimationAudioPlayback.SoloKey == track.Key;
+        if (GUI.Toggle(soloRect, isSolo, new GUIContent("S", "Solo: ouvir só esta faixa"), EditorStyles.miniButton) != isSolo)
+        {
+            AnimationAudioPlayback.SoloKey = isSolo ? null : track.Key;
+        }
+
+        if (track.IsManual)
+        {
+            EditorGUI.BeginChangeCheck();
+            var locked = GUI.Toggle(new Rect(rect.xMax - 56f, rect.y + 3f, 16f, 16f), track.Manual.locked, new GUIContent("L", "Travar: impede arrastar esta faixa"), EditorStyles.miniButton);
+            if (EditorGUI.EndChangeCheck())
+            {
+                track.Manual.locked = locked;
+                model.SaveTrack(track);
+            }
+        }
 
         var row = new Rect(rect.x + 4f, rect.y + 21f, 46f, 16f);
         EditorGUI.BeginChangeCheck();
@@ -1798,6 +1904,14 @@ internal static class AnimationAudioPanel
             var marker = new Color(color.r, color.g, color.b, 1f);
             EditorGUI.DrawRect(new Rect(x, rect.y, 1f, rect.height), Color.Lerp(marker, Color.white, 0.6f));
             GUI.Label(new Rect(x, rect.y, 120f, 14f), FormatActivation(segment.Start, frameRate), markerStyle);
+        }
+    }
+
+    public static void InvalidateLanes()
+    {
+        foreach (var lane in Lanes.Values)
+        {
+            lane.Signature = null;
         }
     }
 
@@ -1911,7 +2025,7 @@ internal static class AnimationAudioPanel
         {
             GUIUtility.hotControl = controlId;
             var time = XToTime(rect, shownArea, currentEvent.mousePosition.x);
-            if (track.IsManual && track.TryGetPosition(time, out _))
+            if (track.IsManual && !track.Manual.locked && track.TryGetPosition(time, out _))
             {
                 draggedTrack = track;
                 dragTimeOffset = time - track.Manual.offset;
@@ -1920,6 +2034,7 @@ internal static class AnimationAudioPanel
             {
                 scrubbing = true;
                 ScrubTo(window, time, frameRate);
+                AnimationAudioPlayback.Scrub(model, window.time);
             }
             currentEvent.Use();
         }
@@ -1935,6 +2050,7 @@ internal static class AnimationAudioPanel
             else if (scrubbing)
             {
                 ScrubTo(window, time, frameRate);
+                AnimationAudioPlayback.Scrub(model, window.time);
                 currentEvent.Use();
             }
         }
@@ -1989,6 +2105,18 @@ internal static class AnimationAudioHarmonyPatch
     private static bool panelFailed;
 
     public static bool Active { get; private set; }
+
+    public static string UnavailableReason
+    {
+        get
+        {
+            if (panelFailed)
+            {
+                return "o painel embutido teve um erro e volta na próxima recompilação. Veja o Console.";
+            }
+            return Active ? null : "Harmony não encontrado ou o Unity mudou a janela Animation.";
+        }
+    }
 
     static AnimationAudioHarmonyPatch()
     {

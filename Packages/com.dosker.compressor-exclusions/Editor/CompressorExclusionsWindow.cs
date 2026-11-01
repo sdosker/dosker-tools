@@ -33,6 +33,7 @@ namespace CompressorExclusions {
             public bool canCompress;
             public RowStatus status;
             public string reason;
+            public string details;
             public ParamChoice choice;
         }
 
@@ -59,7 +60,12 @@ namespace CompressorExclusions {
             (ControlType.FourAxisPuppet, "Puppet 4 eixos"),
         };
 
-        private static readonly ControlType[] CompressibleControls = ControlRules.Select(rule => rule.type).ToArray();
+        private const int ForecastColumns = 3;
+        private const int MaxNamesInTooltip = 30;
+        private const int HistoryRows = 10;
+        private const string SceneSuffix = " (cena)";
+
+        private static readonly string[] ForecastRows = { "Comprimidos", "Protegidos", "Bits", "Lotes", "Atraso", "Cabe" };
 
         private static readonly ParamChoice[] Choices = { ParamChoice.Auto, ParamChoice.Protect, ParamChoice.Compress };
 
@@ -93,9 +99,16 @@ namespace CompressorExclusions {
         private Label bulkLabel;
         private ListView table;
         private Label emptyLabel;
+        private Label[,] forecastCells;
+        private Label forecastStatus;
+        private Label forecastDiff;
+        private Button orphansButton;
+        private VisualElement historyList;
 
         private Snapshot snapshot;
         private string selectedAvatar;
+        // The scene's avatar when it has no build yet, so the window isn't empty before the first one
+        private string sceneAvatarKey;
         private Filter filter = Filter.All;
         private List<Row> allRows = new List<Row>();
         private readonly List<Row> visibleRows = new List<Row>();
@@ -119,6 +132,16 @@ namespace CompressorExclusions {
             CompressorSnapshotStore.Updated -= OnSnapshotUpdated;
         }
 
+        private bool ShowsSceneAvatar => selectedAvatar != null && selectedAvatar == sceneAvatarKey;
+
+        private void OnSelectionChange() {
+            Refresh();
+        }
+
+        private void OnHierarchyChange() {
+            Refresh();
+        }
+
         private void OnSnapshotUpdated() {
             // This arrives in the middle of a build, so wait for it to end
             EditorApplication.delayCall += () => {
@@ -135,7 +158,9 @@ namespace CompressorExclusions {
 
             root.Add(BuildHeader());
             root.Add(BuildSummary());
+            root.Add(BuildForecast());
             root.Add(BuildRules());
+            root.Add(BuildHistory());
             root.Add(BuildTableToolbar());
             root.Add(BuildBulkBar());
             root.Add(BuildTableHeader());
@@ -231,6 +256,59 @@ namespace CompressorExclusions {
             return value;
         }
 
+        private VisualElement BuildForecast() {
+            var foldout = new Foldout { text = "Previsão do build", value = true };
+            foldout.AddToClassList("ce-rules");
+
+            var header = new VisualElement();
+            header.AddToClassList("ce-forecast-row");
+            foreach (var (title, tip) in new[] {
+                ("", ""),
+                ("Próximo build", "O que a configuração atual deve produzir"),
+                ("Previsto", "O que se esperava do último build, antes de ele rodar"),
+                ("Real", "O que o VRCFury fez no último build"),
+            }) {
+                var label = new Label(title) { tooltip = tip };
+                label.AddToClassList("ce-forecast-cell");
+                label.AddToClassList("ce-forecast-head");
+                header.Add(label);
+            }
+            foldout.Add(header);
+
+            forecastCells = new Label[ForecastRows.Length, ForecastColumns];
+            for (var row = 0; row < ForecastRows.Length; row++) {
+                var line = new VisualElement();
+                line.AddToClassList("ce-forecast-row");
+                var title = new Label(ForecastRows[row]);
+                title.AddToClassList("ce-forecast-cell");
+                title.AddToClassList("ce-muted");
+                line.Add(title);
+                for (var column = 0; column < ForecastColumns; column++) {
+                    forecastCells[row, column] = new Label("—");
+                    forecastCells[row, column].AddToClassList("ce-forecast-cell");
+                    line.Add(forecastCells[row, column]);
+                }
+                foldout.Add(line);
+            }
+
+            forecastStatus = new Label();
+            forecastStatus.AddToClassList("ce-forecast-status");
+            foldout.Add(forecastStatus);
+            forecastDiff = new Label();
+            forecastDiff.AddToClassList("ce-muted");
+            forecastDiff.style.whiteSpace = WhiteSpace.Normal;
+            foldout.Add(forecastDiff);
+            return foldout;
+        }
+
+        private VisualElement BuildHistory() {
+            var foldout = new Foldout { text = "Histórico de builds", value = false };
+            foldout.AddToClassList("ce-rules");
+            historyList = new VisualElement();
+            foldout.Add(historyList);
+            return foldout;
+        }
+
         private VisualElement BuildRules() {
             var foldout = new Foldout { text = "Regras gerais", value = true };
             foldout.AddToClassList("ce-rules");
@@ -252,8 +330,10 @@ namespace CompressorExclusions {
             foldout.Add(controls);
 
             var patterns = RuleRow("Padrões de nome");
-            var hint = new Label("Use * como curinga, ex.: Fur*Off ou Roupas/*");
+            var hint = new Label("* e ? são curingas. !Fur* libera das regras e menu:Roupas/* usa o caminho no menu");
             hint.AddToClassList("ce-muted");
+            hint.tooltip = "Exemplos: Fur*Off protege por nome. !Fur*Off libera esses nomes de todas as regras gerais. "
+                           + "menu:Roupas/* protege o que está no submenu Roupas.";
             patterns.Add(hint);
             var spacer = new VisualElement();
             spacer.AddToClassList("ce-spacer");
@@ -265,7 +345,27 @@ namespace CompressorExclusions {
 
             patternList = new VisualElement();
             foldout.Add(patternList);
+
+            orphansButton = new Button(RemoveOrphans);
+            orphansButton.style.alignSelf = Align.FlexStart;
+            foldout.Add(orphansButton);
             return foldout;
+        }
+
+        private List<string> OrphanChoices() {
+            var known = CompressorSnapshotStore.KnownNames();
+            return known.Count == 0
+                ? new List<string>()
+                : Settings.overrides.Select(entry => entry.name).Where(name => !known.Contains(name)).ToList();
+        }
+
+        private void RemoveOrphans() {
+            var orphans = OrphanChoices();
+            var message = "Estas escolhas não aparecem no último build de nenhum avatar. Se existe um avatar que ainda "
+                          + "não passou por um build, as escolhas dele também somem.\n\n" + string.Join(", ", orphans.Take(MaxNamesInTooltip));
+            if (EditorUtility.DisplayDialog("Limpar escolhas", message, "Limpar", "Cancelar")) {
+                Settings.SetChoice(orphans, ParamChoice.Auto);
+            }
         }
 
         private static VisualElement RuleRow(string title) {
@@ -441,7 +541,7 @@ namespace CompressorExclusions {
             view.control.text = row.controlLabel;
             view.bits.text = row.cost.ToString();
             view.status.text = row.reason;
-            view.status.tooltip = row.reason;
+            view.status.tooltip = row.details;
 
             view.status.EnableInClassList("ce-status--compressed", row.status == RowStatus.Compressed);
             view.status.EnableInClassList("ce-status--protected", row.status == RowStatus.Protected);
@@ -459,18 +559,32 @@ namespace CompressorExclusions {
             if (table == null) return;
 
             RefreshAvatarList();
-            snapshot = selectedAvatar == null ? null : CompressorSnapshotStore.Load(selectedAvatar);
+            snapshot = LoadSelected();
 
             RefreshRuleControls();
             var estimate = BuildRows();
             RefreshPatterns();
             RefreshStatus();
             RefreshSummary(estimate);
+            RefreshForecast();
+            RefreshHistory();
             ApplyFilter();
         }
 
+        private Snapshot LoadSelected() {
+            if (selectedAvatar == null) return null;
+            return ShowsSceneAvatar
+                ? CompressorPolicy.SnapshotFromScene(SceneAvatar(), CompressorExclusionPatch.MaxCost())
+                : CompressorSnapshotStore.Load(selectedAvatar);
+        }
+
         private void RefreshAvatarList() {
-            var avatars = CompressorSnapshotStore.AvatarNames();
+            var avatars = CompressorSnapshotStore.Keys();
+            var scene = SceneAvatar();
+            var hasBuild = scene != null && avatars.Any(key => key == scene.name || key.StartsWith(scene.name + " · "));
+            sceneAvatarKey = scene != null && !hasBuild ? scene.name + SceneSuffix : null;
+            if (sceneAvatarKey != null) avatars.Add(sceneAvatarKey);
+
             if (selectedAvatar == null || !avatars.Contains(selectedAvatar)) {
                 selectedAvatar = avatars.FirstOrDefault();
             }
@@ -496,17 +610,9 @@ namespace CompressorExclusions {
             var candidates = new List<EstimatorParam>();
             var verdicts = new Dictionary<SnapshotParam, Verdict>();
             foreach (var param in parameters) {
-                var type = (ParamType)param.valueType;
-                var verdict = CompressorPolicy.Evaluate(settings, param.name, type, param.control);
+                var verdict = CompressorPolicy.Evaluate(settings, param.name, (ParamType)param.valueType, param.control, param.menuPath);
                 verdicts[param] = verdict;
-                if (!verdict.isProtected) {
-                    candidates.Add(new EstimatorParam {
-                        name = param.name,
-                        isBool = type == ParamType.Bool,
-                        control = param.control,
-                        addDriven = param.addDriven
-                    });
-                }
+                if (!verdict.isProtected) candidates.Add(CompressorPolicy.ToEstimator(param));
             }
 
             var estimate = snapshot != null && snapshot.needsCompression
@@ -521,32 +627,36 @@ namespace CompressorExclusions {
 
         private static Row MakeRowModel(SnapshotParam param, Verdict verdict, EstimateResult estimate) {
             var type = (ParamType)param.valueType;
-            var canCompress = CompressibleControls.Contains((ControlType)param.control);
+            var canCompress = CompressorPolicy.CanCompress(param);
             var row = new Row {
                 param = param,
                 displayName = CompressorPolicy.Normalize(param.name),
                 typeLabel = type.ToString(),
                 controlLabel = CompressorPolicy.ControlLabel(param.control),
-                cost = CompressorPolicy.CostOf(type),
+                cost = param.cost > 0 ? param.cost : CompressorPolicy.CostOf(type),
                 canCompress = canCompress,
                 choice = verdict.choice
             };
 
             if (!canCompress) {
                 row.status = RowStatus.Unavailable;
-                row.reason = param.control == CompressorPolicy.NoControl
-                    ? "Fora do menu: o VRCFury não comprime"
-                    : "O VRCFury não comprime este controle";
+                row.reason = param.nonStandardEncoding
+                    ? "Codificação especial: o VRCFury não comprime"
+                    : param.control == CompressorPolicy.NoControl
+                        ? "Fora do menu: o VRCFury não comprime"
+                        : "O VRCFury não comprime este controle";
             } else if (verdict.isProtected) {
                 row.status = RowStatus.Protected;
                 row.reason = verdict.reason;
             } else if (estimate.compressed.Contains(param.name)) {
                 row.status = RowStatus.Compressed;
                 row.reason = verdict.choice == ParamChoice.Compress ? verdict.reason : "Comprimido";
+                row.reason += $" · lote {estimate.batchOf[param.name] + 1}/{estimate.batches}";
             } else {
                 row.status = RowStatus.Direct;
                 row.reason = "Sincroniza direto: não precisou comprimir";
             }
+            row.details = verdict.details == verdict.reason ? row.reason : row.reason + "\n" + verdict.details;
             return row;
         }
 
@@ -570,11 +680,19 @@ namespace CompressorExclusions {
                     view.field.SetValueWithoutNotify(pattern);
                 }
 
-                var matches = allRows.Count(row => CompressorPolicy.MatchesPattern(pattern, row.param.name));
-                var isEmpty = !string.IsNullOrWhiteSpace(pattern) && snapshot != null && matches == 0;
-                view.count.text = string.IsNullOrWhiteSpace(pattern) ? "" : isEmpty ? "Nenhum resultado" : $"{matches} parâmetros";
+                var matches = allRows
+                    .Where(row => CompressorPolicy.MatchesPattern(pattern, row.param.name, row.param.menuPath))
+                    .Select(row => row.displayName)
+                    .ToList();
+                var isEmpty = !string.IsNullOrWhiteSpace(pattern) && snapshot != null && matches.Count == 0;
+                view.count.text = string.IsNullOrWhiteSpace(pattern) ? "" : isEmpty ? "Nenhum resultado" : $"{matches.Count} parâmetros";
+                view.count.tooltip = string.Join("\n", matches.Take(MaxNamesInTooltip));
                 view.count.EnableInClassList("ce-pattern-count--empty", isEmpty);
             }
+
+            var orphans = OrphanChoices().Count;
+            orphansButton.text = $"Limpar {orphans} escolhas sem parâmetro";
+            orphansButton.style.display = orphans > 0 ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         private void RefreshStatus() {
@@ -595,6 +713,9 @@ namespace CompressorExclusions {
             var error = CompressorExclusionPatch.SolverError;
             if (error != null) AddBanner("error", error);
             else if (CompressorExclusionPatch.ReportingError != null) AddBanner("warn", CompressorExclusionPatch.ReportingError);
+            if (CompressorExclusionPatch.IsNewerThanTested) {
+                AddBanner("info", $"O VRCFury {CompressorExclusionPatch.VrcfuryVersion} é mais novo que o testado. Confira o último build abaixo.");
+            }
 
             if (snapshot == null) {
                 ShowBar(0, CompressorExclusionPatch.MaxCost(), "");
@@ -604,11 +725,19 @@ namespace CompressorExclusions {
                 return;
             }
 
+            AddPlatformBanner();
+            AddCollisionBanner();
+            if (ShowsSceneAvatar) {
+                AddBanner("info", "Este avatar ainda não passou por um build. A lista só tem o que já está no avatar: Toggles do VRCFury e prefabs entram no primeiro Build & Test.");
+            }
+
             if (!snapshot.needsCompression) {
                 ShowBar(0, snapshot.maxCost, "");
                 barText.text = "Este avatar cabe no limite";
                 ClearStats();
-                AddBanner("info", "No último build o avatar coube sem compressão, então nada foi comprimido.");
+                if (!ShowsSceneAvatar) {
+                    AddBanner("info", "No último build o avatar coube sem compressão, então nada foi comprimido.");
+                }
                 return;
             }
 
@@ -632,14 +761,165 @@ namespace CompressorExclusions {
             if (!estimate.fits) {
                 AddBanner("error", $"A escolha atual não cabe: precisa de {estimate.finalCost}/{snapshot.maxCost} bits e o VRCFury vai recusar o upload."
                                    + " Libere parâmetros para compressão, de preferência números, que economizam 8 bits cada.");
+                AddFitButton();
             }
 
-            var settingsChanged = snapshot.settingsFingerprint != Settings.Fingerprint();
-            if (settingsChanged) {
+            if (!ShowsSceneAvatar && snapshot.settingsFingerprint != Settings.Fingerprint()) {
                 AddBanner("info", "A configuração mudou desde o último build. Ao enviar, envie PC e depois Quest, para os dois sincronizarem entre si.");
-            } else if (snapshot.hasResult
-                       && (estimate.compressed.Count != snapshot.resultCompressed || estimate.batches != snapshot.resultBatches)) {
-                AddBanner("warn", "A estimativa difere do último build real. Vale o resultado real: o VRCFury pode ter mudado o solver.");
+            }
+        }
+
+        private void AddFitButton() {
+            CompressorPolicy.Split(Settings, snapshot.parameters, out var candidates, out var protectedParams);
+            var release = CompressorEstimator.SuggestRelease(candidates, protectedParams, snapshot.originalCost, snapshot.maxCost);
+            if (release == null) {
+                AddBanner("error", "Mesmo liberando tudo, o avatar não cabe. Remova parâmetros.");
+                return;
+            }
+
+            banners.Add(new Button(() => {
+                var names = release.Select(CompressorPolicy.Normalize);
+                var message = "Marcar como Comprimir:\n\n" + string.Join(", ", names.Take(MaxNamesInTooltip));
+                if (EditorUtility.DisplayDialog("Fazer caber", message, "Marcar", "Cancelar")) {
+                    Settings.SetChoice(release, ParamChoice.Compress);
+                }
+            }) { text = $"Fazer caber: liberar {release.Count} parâmetros" });
+        }
+
+        private void AddPlatformBanner() {
+            var other = CompressorSnapshotStore.Counterpart(snapshot);
+            if (other == null) return;
+
+            var compressed = new HashSet<string>(CompressedNames(snapshot));
+            if (other.settingsFingerprint != snapshot.settingsFingerprint) {
+                AddBanner("warn", $"Os builds de {snapshot.platform} e {other.platform} usaram configurações diferentes. Envie PC e depois Quest, ou eles não sincronizam.");
+            } else if (snapshot.hasResult && other.hasResult && !compressed.SetEquals(CompressedNames(other))) {
+                AddBanner("warn", $"{snapshot.platform} e {other.platform} comprimiram parâmetros diferentes. Confira se o avatar é igual nas duas versões.");
+            }
+        }
+
+        private void AddCollisionBanner() {
+            var repeated = allRows.GroupBy(row => row.displayName).Where(group => group.Count() > 1).Select(group => group.Key).ToList();
+            if (repeated.Count > 0) {
+                AddBanner("info", $"Sem o prefixo do VRCFury, estes nomes se repetem e dividem a mesma escolha: {string.Join(", ", repeated.Take(5))}.");
+            }
+        }
+
+        private static IEnumerable<string> CompressedNames(Snapshot source) {
+            return source.parameters.Where(param => param.compressed).Select(param => CompressorPolicy.Normalize(param.name));
+        }
+
+        private void RefreshForecast() {
+            var next = snapshot != null
+                ? CompressorPolicy.Predict(Settings, snapshot.parameters, snapshot.originalCost, snapshot.maxCost, ShowsSceneAvatar)
+                : new Prediction();
+            FillColumn(0, next);
+
+            var predicted = snapshot == null
+                ? new Prediction()
+                : snapshot.predictionBefore.available ? snapshot.predictionBefore : snapshot.predictionAtBuild;
+            FillColumn(1, predicted);
+            FillRealColumn();
+
+            forecastDiff.text = "";
+            forecastDiff.style.display = DisplayStyle.None;
+            forecastStatus.text = next.partial
+                ? "Previsão parcial: faltam os parâmetros que o VRCFury só cria no build."
+                : ForecastText(next);
+        }
+
+        private string ForecastText(Prediction next) {
+            if (snapshot == null) return "Sem avatar com parâmetros na cena para prever.";
+            if (!snapshot.hasResult) return "O último build não chegou ao resultado do VRCFury.";
+
+            var report = CompressorEstimator.Compare(
+                snapshot.predictionBefore,
+                snapshot.predictionAtBuild,
+                CompressedNames(snapshot),
+                snapshot.resultBatches,
+                snapshot.resultCost,
+                snapshot.resultCost <= snapshot.maxCost
+            );
+
+            var differences = new List<string>();
+            if (report.unexpected.Count > 0) differences.Add($"Comprimiu sem previsão: {string.Join(", ", report.unexpected.Take(MaxNamesInTooltip))}.");
+            if (report.notCompressed.Count > 0) differences.Add($"Previsto, mas não comprimiu: {string.Join(", ", report.notCompressed.Take(MaxNamesInTooltip))}.");
+            forecastDiff.text = string.Join("\n", differences);
+            forecastDiff.style.display = differences.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+
+            switch (report.outcome) {
+                case ForecastOutcome.Match: return "A previsão acertou o último build.";
+                case ForecastOutcome.ParametersChanged:
+                    return "Os parâmetros do avatar mudaram desde o build anterior. Com a lista nova, a previsão acertou.";
+                case ForecastOutcome.SolverDiverged:
+                    return "O resultado real difere da previsão. Vale o real: o VRCFury pode ter mudado o solver.";
+                default: return "Este build não tem previsão salva. O próximo terá.";
+            }
+        }
+
+        private static VRC.SDK3.Avatars.Components.VRCAvatarDescriptor SceneAvatar() {
+            var selected = Selection.activeGameObject;
+            var avatar = selected != null ? selected.GetComponentInParent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>() : null;
+            return avatar != null ? avatar : FindObjectOfType<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
+        }
+
+        private void FillColumn(int column, Prediction prediction) {
+            if (!prediction.available) {
+                for (var row = 0; row < ForecastRows.Length; row++) forecastCells[row, column].text = "—";
+                return;
+            }
+
+            var delay = prediction.batches > 0 ? $"{prediction.minDelay:0.00}–{prediction.maxDelay:0.00}s" : "Nenhum";
+            var values = new[] {
+                prediction.compressed.ToString(),
+                prediction.protectedCount.ToString(),
+                prediction.cost.ToString(),
+                prediction.batches.ToString(),
+                delay,
+                prediction.fits ? "Sim" : "Não"
+            };
+            for (var row = 0; row < values.Length; row++) forecastCells[row, column].text = values[row];
+        }
+
+        private void FillRealColumn() {
+            if (snapshot == null || !snapshot.hasResult) {
+                for (var row = 0; row < ForecastRows.Length; row++) forecastCells[row, 2].text = "—";
+                return;
+            }
+
+            var timing = new EstimateResult { batches = snapshot.resultBatches };
+            var values = new[] {
+                snapshot.resultCompressed.ToString(),
+                "—",
+                snapshot.resultCost.ToString(),
+                snapshot.resultBatches.ToString(),
+                snapshot.resultBatches > 0 ? $"{timing.MinDelay:0.00}–{timing.MaxDelay:0.00}s" : "Nenhum",
+                snapshot.resultCost <= snapshot.maxCost ? "Sim" : "Não"
+            };
+            for (var row = 0; row < values.Length; row++) forecastCells[row, 2].text = values[row];
+        }
+
+        private void RefreshHistory() {
+            historyList.Clear();
+            var history = snapshot == null ? new List<Snapshot>() : CompressorSnapshotStore.History(snapshot.Key);
+            if (history.Count == 0) {
+                var empty = new Label("Nenhum build registrado.");
+                empty.AddToClassList("ce-muted");
+                historyList.Add(empty);
+                return;
+            }
+
+            for (var index = 0; index < history.Count && index < HistoryRows; index++) {
+                var entry = history[index];
+                var text = $"{entry.builtAt}: {entry.resultCost}/{entry.maxCost} bits, {entry.resultCompressed} em {entry.resultBatches} lotes";
+                if (index + 1 < history.Count) {
+                    var older = new HashSet<string>(CompressedNames(history[index + 1]));
+                    var newer = new HashSet<string>(CompressedNames(entry));
+                    var added = newer.Except(older).ToList();
+                    var removed = older.Except(newer).ToList();
+                    if (added.Count + removed.Count > 0) text += $" (+{added.Count} −{removed.Count})";
+                }
+                historyList.Add(new Label(text));
             }
         }
 
@@ -678,7 +958,7 @@ namespace CompressorExclusions {
             table.style.display = hasRows ? DisplayStyle.Flex : DisplayStyle.None;
             emptyLabel.style.display = hasRows ? DisplayStyle.None : DisplayStyle.Flex;
             emptyLabel.text = allRows.Count == 0
-                ? "Os parâmetros aparecem aqui depois do primeiro Build & Test."
+                ? "Abra uma cena com o avatar ou faça um Build & Test para ver os parâmetros."
                 : "Nenhum parâmetro nesta busca ou filtro.";
             UpdateBulkBar();
         }

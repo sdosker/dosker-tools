@@ -159,6 +159,20 @@ footer { padding: 20px 0 32px; border-top: 1px solid var(--border); color: var(-
   .url { flex-basis: 100%; min-height: 40px; }
   .pkg { padding: 14px 16px; }
 }
+#package-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.pkg[hidden] {
+  display: none;
+}
 </style>
 </head>
 <body>
@@ -190,6 +204,7 @@ footer { padding: 20px 0 32px; border-top: 1px solid var(--border); color: var(-
 
   <section aria-labelledby="packages-title">
     <h2 id="packages-title">Pacotes</h2>
+    <input id="package-search" type="search" placeholder="Buscar pacote" aria-label="Buscar pacote">
     <div class="packages">
 __PACKAGES__
     </div>
@@ -211,6 +226,12 @@ __PACKAGES__
 </footer>
 
 <script>
+document.getElementById("package-search").addEventListener("input", (event) => {
+  const query = event.target.value.trim().toLowerCase();
+  for (const card of document.querySelectorAll(".pkg")) {
+    card.hidden = !card.dataset.search.includes(query);
+  }
+});
 document.getElementById("copy").addEventListener("click", async event => {
   const input = document.getElementById("listing-url");
   const button = event.currentTarget;
