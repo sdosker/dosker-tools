@@ -53,7 +53,9 @@ dos ossos que podem ser pegos, que continuam visíveis durante a simulação.
   deixar alteração na cena nem entrada de Undo.
 - **PhysBone Colliders:** esfera, cápsula e plano; vermelho = *Inside Bounds*. O
   cartão lista cada collider com forma, tamanho, *Inside Bounds*, *Bones As
-  Sphere* e quantos PhysBones o usam; clicar no nome seleciona o objeto.
+  Sphere* e quantos PhysBones o usam; clicar no nome seleciona o objeto. PhysBones
+  desativados contam à parte, com aviso, e o tooltip mostra os nomes. Assim, **sem
+  uso** quer dizer que nenhum PhysBone da cena referencia o collider.
 - **Contacts:** senders (laranja) e receivers (azul; verde quando colidindo).
   A janela calcula colisões por tags, *Allow Self/Others* (avatar definido pelo
   `VRCAvatarDescriptor`) e mostra o valor de cada receiver: Constant, OnEnter
@@ -79,6 +81,8 @@ dos ossos que podem ser pegos, que continuam visíveis durante a simulação.
 - **VRC Constraints:** linhas até as fontes com o peso e um “fantasma” da pose
   resolvida (Parent, Position, Rotation, Aim, LookAt), sem mover o objeto.
 
+- **EditorOnly:** objetos com essa tag, e tudo abaixo deles, são ignorados pela
+  janela, porque o build os remove.
 - **Busca:** filtra PhysBones e receivers pelo nome.
 - **Tags de contacts:** mostra quantos senders e receivers usam cada tag e avisa
   quando uma tag não tem par na cena.

@@ -3,6 +3,18 @@
 Todas as mudanças relevantes deste pacote ficam neste arquivo. O formato segue o
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.8.1] - 2026-11-02
+
+### Alterado
+
+- A aba **PhysBone Colliders** conta PhysBones desativados à parte, com aviso e os nomes no tooltip. **Sem uso** agora
+  considera a cena inteira, mesmo com **Somente a hierarquia selecionada** ligado, e **Verificar configuração** avisa
+  sobre colliders usados só por PhysBones desativados.
+
+### Corrigido
+
+- Objetos com a tag **EditorOnly**, e tudo abaixo deles, deixam de aparecer e de ser simulados, porque o build os remove.
+
 ## [0.8.0] - 2026-11-02
 
 ### Adicionado

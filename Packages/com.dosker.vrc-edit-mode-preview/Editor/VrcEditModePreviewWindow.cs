@@ -263,7 +263,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private int physBoneTransforms;
     private int physBoneColliderLinks;
     private int physBoneCollisionChecks;
-    private readonly Dictionary<Component, int> colliderUsers = new Dictionary<Component, int>();
+    private readonly Dictionary<Component, ColliderUse> colliderUses = new Dictionary<Component, ColliderUse>();
 
     private bool showPhysBones = true;
     private bool showPhysBoneLimits = true;
@@ -410,6 +410,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         public Vector3 HalfSize;
         public bool Inside;
         public bool BonesAsSpheres;
+    }
+
+    // Quem referencia um collider, para separar o que está em uso do que só parece estar.
+    private sealed class ColliderUse
+    {
+        public readonly List<string> Active = new List<string>();
+        public readonly List<string> Disabled = new List<string>();
     }
 
     private sealed class TouchedRenderer
@@ -1117,13 +1124,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             : kind == 1
                 ? string.Format("Cápsula · r {0:0.###} · h {1:0.###}", Field(collider, "radius", 0f), Field(collider, "height", 0f))
                 : string.Format("Esfera · r {0:0.###}", Field(collider, "radius", 0f));
-        colliderUsers.TryGetValue(collider, out var users);
+        colliderUses.TryGetValue(collider, out var use);
         var label = string.Format(
             "{0}{1}{2} · {3}",
             size,
             Field(collider, "insideBounds", false) ? " · Inside Bounds" : string.Empty,
             Field(collider, "bonesAsSpheres", false) ? " · Bones As Sphere" : string.Empty,
-            users > 0 ? string.Format("{0} PhysBone(s)", users) : "sem uso");
+            ColliderUseText(use));
         using (new EditorGUILayout.HorizontalScope())
         {
             if (GUILayout.Button(collider.name, EditorStyles.label, GUILayout.Width(140f)))
@@ -1131,8 +1138,41 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 Selection.activeObject = collider.gameObject;
                 EditorGUIUtility.PingObject(collider.gameObject);
             }
-            EditorGUILayout.LabelField(label, EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(new GUIContent(label, ColliderUseTooltip(use)), EditorStyles.miniLabel);
         }
+    }
+
+    private static string ColliderUseText(ColliderUse use)
+    {
+        if (use == null)
+        {
+            return "sem uso";
+        }
+        if (use.Active.Count == 0)
+        {
+            return string.Format("só em {0} PhysBone(s) desativado(s)", use.Disabled.Count);
+        }
+        return use.Disabled.Count == 0
+            ? string.Format("{0} PhysBone(s)", use.Active.Count)
+            : string.Format("{0} PhysBone(s) · {1} desativado(s)", use.Active.Count, use.Disabled.Count);
+    }
+
+    private static string ColliderUseTooltip(ColliderUse use)
+    {
+        if (use == null)
+        {
+            return "Nenhum PhysBone da cena usa este collider. Objetos com a tag EditorOnly não contam.";
+        }
+        var lines = new List<string>();
+        if (use.Active.Count > 0)
+        {
+            lines.Add("Ativos: " + string.Join(", ", use.Active));
+        }
+        if (use.Disabled.Count > 0)
+        {
+            lines.Add("Desativados: " + string.Join(", ", use.Disabled));
+        }
+        return string.Join("\n", lines);
     }
 
     private void DrawContactsCard()
@@ -1276,7 +1316,6 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         lintDone = true;
 
         var claimed = new Dictionary<Transform, Component>();
-        var usedColliders = new HashSet<Component>();
         foreach (var bone in physBones)
         {
             var root = RootOf(bone);
@@ -1305,19 +1344,23 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             }
             foreach (var item in linked)
             {
-                if (item is Component collider && collider != null)
-                {
-                    usedColliders.Add(collider);
-                }
-                else
+                if (!(item is Component collider) || collider == null)
                 {
                     lintResults.Add(string.Format("PhysBone {0}: a lista de colliders tem um item vazio.", bone.name));
                 }
             }
         }
-        foreach (var collider in colliders.Where(collider => !usedColliders.Contains(collider)))
+        foreach (var collider in colliders)
         {
-            lintResults.Add(string.Format("Collider {0}: nenhum PhysBone desta lista o usa.", collider.name));
+            colliderUses.TryGetValue(collider, out var use);
+            if (use == null)
+            {
+                lintResults.Add(string.Format("Collider {0}: nenhum PhysBone o usa.", collider.name));
+            }
+            else if (use.Active.Count == 0)
+            {
+                lintResults.Add(string.Format("Collider {0}: só é usado por PhysBones desativados ({1}).", collider.name, string.Join(", ", use.Disabled)));
+            }
         }
         LintConstraints();
     }
@@ -1543,6 +1586,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         var contacts = new List<Component>();
         CollectComponents(contactType, contacts);
         CountPhysBoneCost();
+        CountColliderUses();
         CollectAvatarSources();
         senders.Clear();
         receivers.Clear();
@@ -1572,53 +1616,75 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         physBoneTransforms = 0;
         physBoneColliderLinks = 0;
         physBoneCollisionChecks = 0;
-        colliderUsers.Clear();
         foreach (var bone in physBones)
         {
             var transforms = RootOf(bone).GetComponentsInChildren<Transform>(true).Length;
-            var list = Field<IList>(bone, "colliders");
-            var linked = list?.Count ?? 0;
+            var linked = Field<IList>(bone, "colliders")?.Count ?? 0;
             physBoneTransforms += transforms;
             physBoneColliderLinks += linked;
             physBoneCollisionChecks += transforms * linked;
+        }
+    }
+
+    // Olha a cena inteira, inclusive PhysBones desativados e fora da seleção: só assim "sem uso" é verdade.
+    private void CountColliderUses()
+    {
+        colliderUses.Clear();
+        foreach (var bone in FindComponents(physBoneType, true).Where(bone => bone != null && !IsEditorOnly(bone.transform)))
+        {
+            var disabled = bone is Behaviour behaviour && !behaviour.isActiveAndEnabled;
+            var list = Field<IList>(bone, "colliders");
             if (list == null)
             {
                 continue;
             }
-            foreach (var item in list)
+            foreach (var collider in list.OfType<Component>().Where(collider => collider != null).Distinct())
             {
-                if (item is Component collider && collider != null)
+                if (!colliderUses.TryGetValue(collider, out var use))
                 {
-                    colliderUsers.TryGetValue(collider, out var users);
-                    colliderUsers[collider] = users + 1;
+                    use = new ColliderUse();
+                    colliderUses[collider] = use;
                 }
+                (disabled ? use.Disabled : use.Active).Add(bone.name);
             }
         }
+    }
+
+    // O build remove objetos com a tag EditorOnly e tudo o que está abaixo deles.
+    private static bool IsEditorOnly(Transform transform)
+    {
+        for (; transform != null; transform = transform.parent)
+        {
+            if (transform.CompareTag("EditorOnly"))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static IEnumerable<Component> FindComponents(Type type, bool includeInactive)
+    {
+        if (type == null)
+        {
+            return Enumerable.Empty<Component>();
+        }
+        var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+        if (prefabStage != null)
+        {
+            return prefabStage.prefabContentsRoot.GetComponentsInChildren(type, includeInactive);
+        }
+        var inactive = includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude;
+        return Object.FindObjectsByType(type, inactive, FindObjectsSortMode.None).OfType<Component>();
     }
 
     private void CollectComponents(Type type, List<Component> target)
     {
         target.Clear();
-        if (type == null)
-        {
-            return;
-        }
-
-        IEnumerable<Component> found;
-        var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
-        if (prefabStage != null)
-        {
-            found = prefabStage.prefabContentsRoot.GetComponentsInChildren(type, false);
-        }
-        else
-        {
-            found = Object.FindObjectsByType(type, FindObjectsInactive.Exclude, FindObjectsSortMode.None).OfType<Component>();
-        }
-
         var selected = onlySelection ? Selection.transforms : null;
-        foreach (var component in found)
+        foreach (var component in FindComponents(type, false))
         {
-            if (component == null || (component is Behaviour behaviour && !behaviour.isActiveAndEnabled))
+            if (component == null || (component is Behaviour behaviour && !behaviour.isActiveAndEnabled) || IsEditorOnly(component.transform))
             {
                 continue;
             }
@@ -3264,7 +3330,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             sdkRestPose.Add(new SavedBone { Transform = transform, LocalPosition = transform.localPosition, LocalRotation = transform.localRotation });
         }
         var bones = chains.Select(chain => chain.Bone).ToList();
-        var linked = bones.SelectMany(bone => (Field<IList>(bone, "colliders") ?? new object[0]).OfType<Component>());
+        var linked = bones.SelectMany(bone => (Field<IList>(bone, "colliders") ?? new object[0]).OfType<Component>()).Where(collider => collider == null || !IsEditorOnly(collider.transform));
         sdkSolver = SdkSolver.TryStart(bones, colliders.Concat(linked).Where(collider => collider != null).Distinct().ToList(), out sdkFailure);
     }
 
@@ -3575,7 +3641,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             foreach (var item in collidersList)
             {
-                if (item is Component collider && collider != null && (!(collider is Behaviour b) || b.isActiveAndEnabled))
+                if (item is Component collider && collider != null && (!(collider is Behaviour b) || b.isActiveAndEnabled) && !IsEditorOnly(collider.transform))
                 {
                     colliderShapes.Add(ColliderShape(collider));
                 }
