@@ -3,6 +3,34 @@
 Todas as mudanças relevantes deste pacote ficam neste arquivo. O formato segue o
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.8.0] - 2026-11-02
+
+### Adicionado
+
+- A simulação roda o `PhysBoneManager` do VRChat SDK no Edit mode, o mesmo solver do Play mode e do Gesture Manager. O
+  status mostra **SDK** ou **Aproximada**; o solver aproximado continua como reserva se o SDK não puder iniciar.
+- Colliders do Avatar Descriptor (Head, Torso, Hand, Foot e Finger) atuam como senders, com opção para desligar.
+- **Tocar com o mouse:** segurar o botão esquerdo sobre um receiver o aciona, com filtro de tag opcional.
+- A aba **PhysBone Colliders** lista cada collider com forma, tamanho, marcas e quantos PhysBones o usam.
+
+### Alterado
+
+- Os ossos são pegos pelo próprio osso na Scene View, e não mais por pontos clicáveis. Com o botão esquerdo pressionado,
+  o direito posa, como no Play mode. **Grab Movement** e os filtros de Grab e Pose passam a valer.
+- Solver aproximado: colisão testa o osso inteiro, com **Bones As Sphere**, e pode alterar o comprimento dentro de Max
+  Stretch e Max Squish. Valem também Multi-Child, Ignore Other Phys Bones, as curvas de Stretch, Squish, Stretch Motion
+  e Limit Rotation, e o limite de 256 transforms.
+- Stretch e Squish movem os ossos, não só os gizmos.
+- **Gravity Falloff** é medido em relação à pose de repouso, e `_Angle` usa o osso final.
+
+### Corrigido
+
+- A aba **PhysBone Colliders** abria sem conteúdo.
+
+### Limitações
+
+- Com o solver do SDK, a simulação pausa quando o Unity perde o foco, e o botão de sacudir fica desativado.
+
 ## [0.7.0] - 2026-11-01
 
 ### Adicionado

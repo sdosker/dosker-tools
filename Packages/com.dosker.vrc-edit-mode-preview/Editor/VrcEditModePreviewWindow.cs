@@ -15,7 +15,7 @@ using Object = UnityEngine.Object;
 public sealed class VrcEditModePreviewWindow : EditorWindow
 {
     private const float SimulationStep = 1f / 60f;
-    private const int MaxParticlesPerChain = 512;
+    private const int MaxParticlesPerChain = 256;
     private const int GrabSolverIterations = 8;
     private const string PrefsFile = "VrcEditModePreview";
     private const float ImpulseStrength = 0.6f;
@@ -35,6 +35,8 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private const float SoftLimitStart = 0.8f;
     private const float JumpCycles = 0.7f;
     private const float StandingArms = -70f;
+    private const float MinimumLever = 0.25f;
+    private const float PickPixels = 8f;
     private static readonly string[] SpineMuscles = { "Spine Front-Back", "Chest Front-Back", "UpperChest Front-Back" };
     private static readonly string[] NeckMuscles = { "Neck Nod Down-Up", "Head Nod Down-Up" };
     private static readonly string[] Fingers = { "Thumb", "Index", "Middle", "Ring", "Little" };
@@ -45,6 +47,25 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         "Poses/T-pose", "Poses/A-pose",
         "Pernas/Levantar joelhos", "Pernas/Calcanhar para trás", "Pernas/Levantar perna esticada", "Pernas/Agachamento", "Pernas/Abrir as pernas",
         "Tronco e braços/Erguer os braços", "Tronco e braços/Abraçar o corpo", "Tronco e braços/Torcer o tronco", "Tronco e braços/Inclinar para os lados", "Tronco e braços/Olhar em volta",
+    };
+
+    // Colliders do Avatar Descriptor que viram senders no cliente; a mesma tabela do Gesture Manager.
+    private static readonly (HumanBodyBones Bone, string Field, string[] Tags)[] AvatarColliders =
+    {
+        (HumanBodyBones.Head, "collider_head", new[] { "Head" }),
+        (HumanBodyBones.Chest, "collider_torso", new[] { "Torso" }),
+        (HumanBodyBones.LeftFoot, "collider_footL", new[] { "Foot", "FootL" }),
+        (HumanBodyBones.RightFoot, "collider_footR", new[] { "Foot", "FootR" }),
+        (HumanBodyBones.LeftHand, "collider_handL", new[] { "Hand", "HandL" }),
+        (HumanBodyBones.RightHand, "collider_handR", new[] { "Hand", "HandR" }),
+        (HumanBodyBones.LeftRingProximal, "collider_fingerRingL", new[] { "Finger", "FingerL", "FingerRing", "FingerRingL" }),
+        (HumanBodyBones.RightRingProximal, "collider_fingerRingR", new[] { "Finger", "FingerR", "FingerRing", "FingerRingR" }),
+        (HumanBodyBones.LeftIndexProximal, "collider_fingerIndexL", new[] { "Finger", "FingerL", "FingerIndex", "FingerIndexL" }),
+        (HumanBodyBones.RightIndexProximal, "collider_fingerIndexR", new[] { "Finger", "FingerR", "FingerIndex", "FingerIndexR" }),
+        (HumanBodyBones.LeftLittleProximal, "collider_fingerLittleL", new[] { "Finger", "FingerL", "FingerLittle", "FingerLittleL" }),
+        (HumanBodyBones.RightLittleProximal, "collider_fingerLittleR", new[] { "Finger", "FingerR", "FingerLittle", "FingerLittleR" }),
+        (HumanBodyBones.LeftMiddleProximal, "collider_fingerMiddleL", new[] { "Finger", "FingerL", "FingerMiddle", "FingerMiddleL" }),
+        (HumanBodyBones.RightMiddleProximal, "collider_fingerMiddleR", new[] { "Finger", "FingerR", "FingerMiddle", "FingerMiddleR" }),
     };
 
     // Layout de Packages/com.vrchat.base/ShaderLibrary/VRCContacts.cginc.
@@ -62,6 +83,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private static Type receiverType;
     private static Type constraintType;
     private static Type avatarDescriptorType;
+    private static MethodInfo calcLimitRotation;
 
     private readonly List<Component> physBones = new List<Component>();
     private readonly List<Component> colliders = new List<Component>();
@@ -71,12 +93,18 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private readonly List<Chain> chains = new List<Chain>();
     private readonly HashSet<Component> simulatedBones = new HashSet<Component>();
     private readonly Dictionary<Component, ReceiverState> receiverStates = new Dictionary<Component, ReceiverState>();
-    private readonly Dictionary<Component, Vector3> previousSenderPositions = new Dictionary<Component, Vector3>();
+    private readonly Dictionary<object, Vector3> previousSenderPositions = new Dictionary<object, Vector3>();
+    private readonly List<ContactSource> avatarSources = new List<ContactSource>();
     private readonly Dictionary<Renderer, TouchedRenderer> touchedRenderers = new Dictionary<Renderer, TouchedRenderer>();
     private readonly Dictionary<Transform, int> playerIds = new Dictionary<Transform, int>();
     private MaterialPropertyBlock propertyBlock;
     private double lastContactTime;
     private bool writeMaterialContacts = true;
+    private bool avatarColliderContacts = true;
+    private bool touchContacts;
+    private string touchTag = "";
+    private bool touching;
+    private Ray touchRay;
 
     [Serializable]
     private sealed class Preferences
@@ -93,6 +121,9 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         public bool allowGrab = true;
         public bool liveContacts = true;
         public bool writeMaterialContacts = true;
+        public bool avatarColliderContacts = true;
+        public bool touchContacts;
+        public string touchTag = "";
         public float handleOpacity = 0.8f;
         public bool followArmatureLinks = true;
         public float testMotionSpeed = 1f;
@@ -232,6 +263,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private int physBoneTransforms;
     private int physBoneColliderLinks;
     private int physBoneCollisionChecks;
+    private readonly Dictionary<Component, int> colliderUsers = new Dictionary<Component, int>();
 
     private bool showPhysBones = true;
     private bool showPhysBoneLimits = true;
@@ -258,6 +290,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private Chain grabbedChain;
     private int grabbedParticle = -1;
     private Vector3 grabbedPosition;
+    private Vector3 grabbedTarget;
+    private Vector3 grabOriginLocal;
+    private object sdkGrab;
+    private SdkSolver sdkSolver;
+    private string sdkFailure;
+    private readonly HashSet<Component> pendingConfiguration = new HashSet<Component>();
+    private readonly List<SavedBone> sdkRestPose = new List<SavedBone>();
 
     private sealed class Particle
     {
@@ -265,6 +304,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         public int Parent;
         public readonly List<int> Children = new List<int>();
         public bool Virtual;
+        public bool Pinned;
         public Vector3 EndOffset;
         public Vector3 RestLocalPosition;
         public Quaternion RestLocalRotation;
@@ -290,6 +330,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         public float Stretch;
         public float Squish;
         public bool FollowsLink;
+        public bool RootStill;
     }
 
     // Lido uma vez por passo: os valores não mudam entre as partículas de uma cadeia.
@@ -330,9 +371,26 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         public int WrittenRenderers;
     }
 
+    // Um sender da cena ou um collider do avatar, que não tem componente.
+    private sealed class ContactSource
+    {
+        public Component Component;
+        public string Name;
+        public Transform Root;
+        public Transform Avatar;
+        public bool HasDescriptor;
+        public List<string> Tags;
+        public Vector3 LocalPosition;
+        public Quaternion LocalRotation;
+        public float Radius;
+        public float Height;
+        public Shape Shape;
+        public object Key => (object)Component ?? this;
+    }
+
     private struct ContactHit
     {
-        public Component Sender;
+        public ContactSource Sender;
         public Shape Shape;
         public float Proximity;
         public float Gap;
@@ -351,12 +409,250 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         public float Height;
         public Vector3 HalfSize;
         public bool Inside;
+        public bool BonesAsSpheres;
     }
 
     private sealed class TouchedRenderer
     {
         public bool WasEmpty;
         public readonly HashSet<string> Names = new HashSet<string>();
+    }
+
+    // Roda o PhysBoneManager do SDK no Edit mode, do jeito que o Gesture Manager faz no Play mode. O SDK não prevê
+    // este uso, então qualquer membro ausente ou erro devolve o controle ao solver aproximado.
+    private sealed class SdkSolver
+    {
+        private const BindingFlags Members = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+        // O mesmo id que o PhysBoneGrabHelper usa quando não há jogador local.
+        private const int LocalPlayer = -1;
+
+        private readonly List<Component> bones = new List<Component>();
+        private readonly List<Component> boneColliders = new List<Component>();
+        private readonly Type managerType = FindType("VRC.Dynamics.PhysBoneManager");
+        private FieldInfo instance;
+        private MethodInfo removePhysBone;
+        private MethodInfo removeCollider;
+        private MethodInfo fixedUpdate;
+        private MethodInfo lateUpdate;
+        private MethodInfo completeJob;
+        private MethodInfo dispose;
+        private MethodInfo attemptRayGrab;
+        private MethodInfo attemptChainGrab;
+        private MethodInfo releaseGrab;
+        private FieldInfo chainId;
+        private PropertyInfo isGrabbed;
+        private PropertyInfo isPosed;
+        private GameObject host;
+        private Component manager;
+
+        public static SdkSolver TryStart(List<Component> bones, List<Component> colliders, out string failure)
+        {
+            failure = null;
+            var solver = new SdkSolver();
+            try
+            {
+                solver.Start(bones, colliders);
+                return solver;
+            }
+            catch (Exception exception)
+            {
+                failure = (exception.InnerException ?? exception).Message;
+                solver.Stop();
+                return null;
+            }
+        }
+
+        private static MethodInfo Required(Type type, string name, params Type[] parameters)
+        {
+            var method = type?.GetMethod(name, Members, null, parameters, null);
+            if (method == null)
+            {
+                throw new MissingMethodException(type?.Name ?? "PhysBoneManager", name);
+            }
+            return method;
+        }
+
+        private static FieldInfo RequiredField(Type type, string name)
+        {
+            var field = type?.GetField(name, Members);
+            if (field == null)
+            {
+                throw new MissingFieldException(type?.Name ?? "PhysBoneManager", name);
+            }
+            return field;
+        }
+
+        private void Start(List<Component> physBones, List<Component> colliders)
+        {
+            instance = RequiredField(managerType, "Inst");
+            if (instance.GetValue(null) as Object != null)
+            {
+                throw new InvalidOperationException("já existe um PhysBoneManager ativo.");
+            }
+
+            var chainIdType = FindType("VRC.Dynamics.ChainId");
+            var addPhysBone = Required(managerType, "AddPhysBone", physBoneType);
+            var hasPhysBone = Required(managerType, "HasPhysBone", physBoneType);
+            var addCollider = Required(managerType, "AddCollider", colliderType);
+            var init = Required(managerType, "Init");
+            var initBone = Required(physBoneType, "Init");
+            var initShape = Required(colliderType, "InitShape");
+            var isSdk = RequiredField(managerType, "IsSDK");
+            removePhysBone = Required(managerType, "RemovePhysBone", physBoneType);
+            removeCollider = Required(managerType, "RemoveCollider", colliderType);
+            fixedUpdate = Required(managerType, "FixedUpdate");
+            lateUpdate = Required(managerType, "LateUpdate");
+            completeJob = Required(managerType, "CompleteJob");
+            dispose = Required(managerType, "Dispose");
+            attemptRayGrab = Required(managerType, "AttemptGrab", typeof(int), typeof(Ray), typeof(Vector3).MakeByRefType());
+            attemptChainGrab = Required(managerType, "AttemptGrab", typeof(int), chainIdType, typeof(int));
+            releaseGrab = Required(managerType, "ReleaseGrab", managerType.GetNestedType("Grab"), typeof(bool), typeof(int));
+            chainId = RequiredField(physBoneType, "chainId");
+            isGrabbed = physBoneType.GetProperty("IsGrabbed", Members);
+            isPosed = physBoneType.GetProperty("IsPosed", Members);
+
+            host = new GameObject("DoskerPhysBoneManager") { hideFlags = HideFlags.HideAndDontSave };
+            manager = host.AddComponent(managerType);
+            isSdk.SetValue(manager, true);
+            init.Invoke(manager, null);
+            // Sem [ExecuteAlways] o Awake não roda, e é ele quem preencheria o Inst.
+            instance.SetValue(null, manager);
+
+            foreach (var bone in physBones)
+            {
+                ForgetBone(bone);
+                initBone.Invoke(bone, null);
+                if (!(bool)hasPhysBone.Invoke(manager, new object[] { bone }))
+                {
+                    addPhysBone.Invoke(manager, new object[] { bone });
+                }
+                bones.Add(bone);
+            }
+            foreach (var collider in colliders)
+            {
+                ForgetInit(collider, colliderType, "shape");
+                initShape.Invoke(collider, null);
+                addCollider.Invoke(manager, new object[] { collider });
+                boneColliders.Add(collider);
+            }
+        }
+
+        // Os componentes guardam o que receberam do manager anterior: com isso, um novo início manteria a pose de
+        // repouso antiga e não registraria as formas de colisão de novo.
+        private static void ForgetInit(Component component, Type type, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                var field = type.GetField(name, Members);
+                field?.SetValue(component, field.FieldType.IsValueType ? Activator.CreateInstance(field.FieldType) : null);
+            }
+        }
+
+        private static void ForgetBone(Component bone)
+        {
+            ForgetInit(bone, physBoneType, "hasInitParams", "hasInitTransform", "root", "shape", "chainId");
+            Field<IList>(bone, "bones")?.Clear();
+        }
+
+        public void Tick()
+        {
+            // O solver mede o tempo por Time, que no Edit mode só anda quando o player loop roda.
+            EditorApplication.QueuePlayerLoopUpdate();
+            fixedUpdate.Invoke(manager, null);
+            lateUpdate.Invoke(manager, null);
+        }
+
+        public void CompleteJob()
+        {
+            if (manager != null)
+            {
+                completeJob.Invoke(manager, null);
+            }
+        }
+
+        public void ApplyConfiguration(Component component)
+        {
+            component.GetType().GetMethod("ApplyConfigurationChanges", Members)?.Invoke(component, null);
+        }
+
+        public object BeginGrab(Ray ray, Chain chain, int particle, out Vector3 origin)
+        {
+            var arguments = new object[] { LocalPlayer, ray, Vector3.zero };
+            var grab = attemptRayGrab.Invoke(manager, arguments);
+            origin = (Vector3)arguments[2];
+            if (grab == null)
+            {
+                // O raio do SDK usa só o Radius do osso, que costuma ser menor que a área de clique.
+                grab = attemptChainGrab.Invoke(manager, new[] { LocalPlayer, chainId.GetValue(chain.Bone), Mathf.Max(0, particle - 1) });
+                origin = chain.Particles[particle].Position;
+            }
+            return grab;
+        }
+
+        public void MoveGrab(object grab, Vector3 point)
+        {
+            var type = grab.GetType();
+            var offset = (Vector3)type.GetProperty("LocalOffset", Members).GetValue(grab);
+            type.GetProperty("GlobalPosition", Members).SetValue(grab, point + offset);
+        }
+
+        public void ReleaseGrab(object grab, bool pose)
+        {
+            releaseGrab.Invoke(manager, new[] { grab, pose, releaseGrab.GetParameters()[2].DefaultValue });
+        }
+
+        public bool IsGrabbed(Component bone)
+        {
+            return isGrabbed != null && (bool)isGrabbed.GetValue(bone);
+        }
+
+        public bool IsPosed(Component bone)
+        {
+            return isPosed != null && (bool)isPosed.GetValue(bone);
+        }
+
+        public void Stop()
+        {
+            if (host == null)
+            {
+                return;
+            }
+            try
+            {
+                foreach (var bone in bones.Where(bone => bone != null))
+                {
+                    removePhysBone.Invoke(manager, new object[] { bone });
+                }
+                foreach (var collider in boneColliders.Where(collider => collider != null))
+                {
+                    removeCollider.Invoke(manager, new object[] { collider });
+                }
+                // As remoções ficam em fila até o próximo passo.
+                completeJob.Invoke(manager, null);
+                lateUpdate.Invoke(manager, null);
+                completeJob.Invoke(manager, null);
+                dispose.Invoke(manager, null);
+                foreach (var bone in bones.Where(bone => bone != null))
+                {
+                    ForgetBone(bone);
+                }
+                foreach (var collider in boneColliders.Where(collider => collider != null))
+                {
+                    ForgetInit(collider, colliderType, "shape");
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("VRC preview: erro ao parar o solver do SDK: " + (exception.InnerException ?? exception).Message);
+            }
+            finally
+            {
+                Object.DestroyImmediate(host);
+                host = null;
+                manager = null;
+                instance?.SetValue(null, null);
+            }
+        }
     }
 
     [MenuItem("Tools/Dosker Tools/Validar Edit-Mode Preview")]
@@ -384,6 +680,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         EditorApplication.update += HandleEditorUpdate;
         EditorApplication.hierarchyChanged += MarkComponentsDirty;
         EditorApplication.playModeStateChanged += HandlePlayModeChanged;
+        AssemblyReloadEvents.beforeAssemblyReload += StopSdkSolver;
         AssemblyReloadEvents.beforeAssemblyReload += RestoreAllChains;
         AssemblyReloadEvents.beforeAssemblyReload += ClearMaterialContacts;
         EditorSceneManager.sceneSaving += HandleSceneSaving;
@@ -394,6 +691,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private void OnDisable()
     {
         SavePreferences();
+        StopSdkSolver();
         RestoreAllChains();
         ClearMaterialContacts();
         SceneView.beforeSceneGui -= HandleLockMouseDown;
@@ -402,6 +700,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         EditorApplication.update -= HandleEditorUpdate;
         EditorApplication.hierarchyChanged -= MarkComponentsDirty;
         EditorApplication.playModeStateChanged -= HandlePlayModeChanged;
+        AssemblyReloadEvents.beforeAssemblyReload -= StopSdkSolver;
         AssemblyReloadEvents.beforeAssemblyReload -= RestoreAllChains;
         AssemblyReloadEvents.beforeAssemblyReload -= ClearMaterialContacts;
         EditorSceneManager.sceneSaving -= HandleSceneSaving;
@@ -424,6 +723,9 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         allowGrab = saved.allowGrab;
         liveContacts = saved.liveContacts;
         writeMaterialContacts = saved.writeMaterialContacts;
+        avatarColliderContacts = saved.avatarColliderContacts;
+        touchContacts = saved.touchContacts;
+        touchTag = saved.touchTag ?? "";
         handleOpacity = saved.handleOpacity;
         followArmatureLinks = saved.followArmatureLinks;
         testMotionSpeed = saved.testMotionSpeed;
@@ -445,6 +747,9 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             allowGrab = allowGrab,
             liveContacts = liveContacts,
             writeMaterialContacts = writeMaterialContacts,
+            avatarColliderContacts = avatarColliderContacts,
+            touchContacts = touchContacts,
+            touchTag = touchTag,
             handleOpacity = handleOpacity,
             followArmatureLinks = followArmatureLinks,
             testMotionSpeed = testMotionSpeed,
@@ -462,6 +767,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             simulatePhysBones = false;
             lockTracking = false;
+            StopSdkSolver();
             RestoreAllChains();
             chains.Clear();
             ClearPosedState();
@@ -490,6 +796,17 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         if (lockTracking && modifications.Any(m => m.currentValue != null && m.currentValue.target is Transform))
         {
             lockMoved = true;
+        }
+        if (sdkSolver != null)
+        {
+            // O SDK copia os valores ao iniciar: sem isto, ajustes no Inspector só valeriam depois de reiniciar.
+            foreach (var target in modifications.Select(m => m.currentValue?.target).OfType<Component>())
+            {
+                if (physBoneType.IsInstanceOfType(target) || colliderType.IsInstanceOfType(target))
+                {
+                    pendingConfiguration.Add(target);
+                }
+            }
         }
         return modifications;
     }
@@ -601,8 +918,12 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     }
 
     // A reflexão falha em silêncio depois de uma atualização do SDK, então o que faltou fica visível.
-    private static void DrawHealth()
+    private void DrawHealth()
     {
+        if (simulatePhysBones && sdkFailure != null)
+        {
+            DoskerEditorUi.Banner("Solver do SDK indisponível, usando o aproximado: " + sdkFailure, DoskerEditorUi.BannerKind.Warning);
+        }
         if (MissingFields.Count > 0)
         {
             DoskerEditorUi.Banner(
@@ -636,7 +957,10 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             EditorGUILayout.Space(4f);
             using (new EditorGUILayout.HorizontalScope())
             {
-                var status = !simulatePhysBones ? "Desligada" : lockMode ? "Ativa · Bloqueio" : "Ativa";
+                // Sem foco o Editor não avança Time, e o solver do SDK para junto.
+                var paused = sdkSolver != null && !UnityEditorInternal.InternalEditorUtility.isApplicationActive;
+                var solverLabel = sdkSolver == null ? "Aproximada" : paused ? "SDK · pausada sem foco" : "SDK";
+                var status = !simulatePhysBones ? "Desligada" : lockMode ? solverLabel + " · Bloqueio" : solverLabel;
                 var statusColor = simulatePhysBones ? DoskerEditorUi.Green : DoskerEditorUi.Neutral;
                 DoskerEditorUi.StatusPill(status, statusColor, 22f);
                 using (new EditorGUI.DisabledScope(!simulatePhysBones))
@@ -652,16 +976,22 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                         "Arrastar",
                         "ViewToolMove",
                         DoskerEditorUi.Cyan,
-                        "Arrastar ossos pelos pontos na Scene View; os ossos anteriores acompanham.");
+                        "Arrastar ossos na Scene View, como no Play mode. Com o botão esquerdo pressionado, o direito posa.");
                     poseOnRelease = DoskerEditorUi.ChipToggle(
                         poseOnRelease,
                         "Posar",
                         "AvatarPivot",
                         DoskerEditorUi.Purple,
                         "Ao soltar, o osso mantém a pose, se Allow Posing estiver ligado. Clique em Reiniciar para soltar.");
-                    if (DoskerEditorUi.IconButton("PreMatCube", "↯", "Sacudir: dá o mesmo impulso a todas as cadeias, para comparar ajustes.", 22f))
+                    using (new EditorGUI.DisabledScope(sdkSolver != null))
                     {
-                        ApplyImpulse();
+                        var tooltip = sdkSolver != null
+                            ? "Sacudir só funciona no solver aproximado."
+                            : "Sacudir: dá o mesmo impulso a todas as cadeias, para comparar ajustes.";
+                        if (DoskerEditorUi.IconButton("PreMatCube", "↯", tooltip, 22f))
+                        {
+                            ApplyImpulse();
+                        }
                     }
                 }
             }
@@ -755,7 +1085,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
     private void DrawCollidersCard()
     {
-        using (new DoskerEditorUi.CardScope(
+        using (var card = new DoskerEditorUi.CardScope(
             "Vrc.Colliders",
             "PhysBone Colliders",
             "CapsuleCollider Icon",
@@ -763,6 +1093,45 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             colliders.Count.ToString(),
             ref showColliders))
         {
+            if (!card.Expanded)
+            {
+                return;
+            }
+            if (colliders.Count == 0)
+            {
+                EditorGUILayout.LabelField("Nenhum PhysBone Collider nesta cena.", EditorStyles.miniLabel);
+                return;
+            }
+            foreach (var collider in colliders.Where(collider => collider != null && MatchesSearch(collider.name)))
+            {
+                DrawColliderRow(collider);
+            }
+        }
+    }
+
+    private void DrawColliderRow(Component collider)
+    {
+        var kind = EnumField(collider, "shapeType");
+        var size = kind == 2
+            ? "Plano"
+            : kind == 1
+                ? string.Format("Cápsula · r {0:0.###} · h {1:0.###}", Field(collider, "radius", 0f), Field(collider, "height", 0f))
+                : string.Format("Esfera · r {0:0.###}", Field(collider, "radius", 0f));
+        colliderUsers.TryGetValue(collider, out var users);
+        var label = string.Format(
+            "{0}{1}{2} · {3}",
+            size,
+            Field(collider, "insideBounds", false) ? " · Inside Bounds" : string.Empty,
+            Field(collider, "bonesAsSpheres", false) ? " · Bones As Sphere" : string.Empty,
+            users > 0 ? string.Format("{0} PhysBone(s)", users) : "sem uso");
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button(collider.name, EditorStyles.label, GUILayout.Width(140f)))
+            {
+                Selection.activeObject = collider.gameObject;
+                EditorGUIUtility.PingObject(collider.gameObject);
+            }
+            EditorGUILayout.LabelField(label, EditorStyles.miniLabel);
         }
     }
 
@@ -790,6 +1159,16 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                     ClearMaterialContacts();
                 }
                 writeMaterialContacts = nextWrite;
+                avatarColliderContacts = EditorGUILayout.ToggleLeft(
+                    new GUIContent("Colliders do avatar", "Head, Torso, Hand, Foot e Finger do Avatar Descriptor atuam como senders, como no Gesture Manager."),
+                    avatarColliderContacts);
+                touchContacts = EditorGUILayout.ToggleLeft(
+                    new GUIContent("Tocar com o mouse", "Na Scene View, segure o botão esquerdo sobre um receiver para acioná-lo. Não afeta Material Contacts."),
+                    touchContacts);
+                using (new EditorGUI.DisabledScope(!touchContacts))
+                {
+                    touchTag = EditorGUILayout.TextField(new GUIContent("Tag", "Deixe vazio para ignorar as tags."), touchTag);
+                }
             }
             if (nextLiveContacts != liveContacts && !nextLiveContacts)
             {
@@ -830,6 +1209,14 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private void DrawTagMatrix()
     {
         var sent = CountTags(senders);
+        if (avatarColliderContacts)
+        {
+            foreach (var tag in avatarSources.SelectMany(source => source.Tags))
+            {
+                sent.TryGetValue(tag, out var count);
+                sent[tag] = count + 1;
+            }
+        }
         var heard = CountTags(receivers);
         foreach (var tag in sent.Keys.Union(heard.Keys).OrderBy(tag => tag))
         {
@@ -992,11 +1379,12 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             onlySelection = EditorGUILayout.ToggleLeft("Somente a hierarquia selecionada", onlySelection);
             handleOpacity = EditorGUILayout.Slider("Opacidade", handleOpacity, 0.1f, 1f);
             EditorGUILayout.HelpBox(
-                "Os desenhos seguem o botão Gizmos da Scene View; os pontos de arraste continuam visíveis. " +
-                "A simulação gira os ossos das cadeias apenas enquanto está ativa e restaura a pose original ao desligar, " +
-                "salvar a cena, recompilar ou entrar no Play mode. Mova o avatar ou arraste os ossos para ver a reação; " +
-                "ao arrastar, os ossos anteriores acompanham. Com Bloqueio ativo, o objeto movido volta ao estado original " +
-                "ao soltar o mouse. É uma aproximação do solver do VRChat: valores finais devem ser confirmados no Play mode/cliente.",
+                "Os desenhos seguem o botão Gizmos da Scene View; os pontos dos ossos continuam visíveis. " +
+                "A simulação move os ossos das cadeias apenas enquanto está ativa e restaura a pose original ao desligar, " +
+                "salvar a cena, recompilar ou entrar no Play mode. Arraste um osso na Scene View para pegá-lo; com o botão " +
+                "esquerdo pressionado, o direito posa. Com Bloqueio ativo, o objeto movido volta ao estado original ao soltar o mouse. " +
+                "O status mostra o solver em uso: SDK roda o PhysBoneManager do VRChat SDK e pausa quando o Unity perde o foco; " +
+                "Aproximada é a reserva, usada se o SDK não puder iniciar. Confirme os valores finais no Play mode ou no cliente.",
                 MessageType.None);
         }
     }
@@ -1155,6 +1543,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         var contacts = new List<Component>();
         CollectComponents(contactType, contacts);
         CountPhysBoneCost();
+        CollectAvatarSources();
         senders.Clear();
         receivers.Clear();
         foreach (var contact in contacts)
@@ -1183,13 +1572,27 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         physBoneTransforms = 0;
         physBoneColliderLinks = 0;
         physBoneCollisionChecks = 0;
+        colliderUsers.Clear();
         foreach (var bone in physBones)
         {
             var transforms = RootOf(bone).GetComponentsInChildren<Transform>(true).Length;
-            var linked = Field<IList>(bone, "colliders")?.Count ?? 0;
+            var list = Field<IList>(bone, "colliders");
+            var linked = list?.Count ?? 0;
             physBoneTransforms += transforms;
             physBoneColliderLinks += linked;
             physBoneCollisionChecks += transforms * linked;
+            if (list == null)
+            {
+                continue;
+            }
+            foreach (var item in list)
+            {
+                if (item is Component collider && collider != null)
+                {
+                    colliderUsers.TryGetValue(collider, out var users);
+                    colliderUsers[collider] = users + 1;
+                }
+            }
         }
     }
 
@@ -1304,6 +1707,21 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
     // ---------------------------------------------------------------- Formas
 
+    private static Shape CapsuleAt(Transform root, Vector3 position, Quaternion rotation, float radius, float height)
+    {
+        var scale = MaxScale(root);
+        var shape = new Shape
+        {
+            Kind = 1,
+            Center = root.TransformPoint(position),
+            Rotation = root.rotation * rotation,
+            Radius = radius * scale,
+            Height = height * scale,
+        };
+        FinishSegment(ref shape);
+        return shape;
+    }
+
     private static Shape ContactShape(Component contact)
     {
         var root = RootOf(contact);
@@ -1339,6 +1757,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             Radius = Field(collider, "radius", 0f) * scale,
             Height = Field(collider, "height", 0f) * scale,
             Inside = Field(collider, "insideBounds", false),
+            BonesAsSpheres = Field(collider, "bonesAsSpheres", false),
         };
         FinishSegment(ref shape);
         return shape;
@@ -1462,12 +1881,20 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         lastContactTime = now;
         playerIds.Clear();
 
-        var senderShapes = new List<KeyValuePair<Component, Shape>>(senders.Count);
+        var sources = new List<ContactSource>(senders.Count + avatarSources.Count);
         foreach (var sender in senders)
         {
             if (sender != null)
             {
-                senderShapes.Add(new KeyValuePair<Component, Shape>(sender, ContactShape(sender)));
+                sources.Add(SourceFor(sender));
+            }
+        }
+        if (avatarColliderContacts)
+        {
+            foreach (var source in avatarSources.Where(source => source.Root != null))
+            {
+                source.Shape = CapsuleAt(source.Root, source.LocalPosition, source.LocalRotation, source.Radius, source.Height);
+                sources.Add(source);
             }
         }
 
@@ -1493,9 +1920,9 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             state.Senders.Clear();
             state.Hits.Clear();
 
-            foreach (var pair in senderShapes)
+            foreach (var source in sources)
             {
-                var senderTags = Field<List<string>>(pair.Key, "collisionTags");
+                var senderTags = source.Tags;
                 if (senderTags == null)
                 {
                     continue;
@@ -1512,21 +1939,21 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 {
                     continue;
                 }
-                var isSelf = AvatarRoot(pair.Key.transform) == receiverAvatar;
+                var isSelf = source.Avatar == receiverAvatar;
                 if ((isSelf && !allowSelf) || (!isSelf && !allowOthers))
                 {
                     continue;
                 }
 
-                if (!TryContactProximity(pair.Value, receiverShape, faceProximity, out var proximity, out var gap))
+                if (!TryContactProximity(source.Shape, receiverShape, faceProximity, out var proximity, out var gap))
                 {
                     continue;
                 }
-                state.Senders.Add(pair.Key.name);
+                state.Senders.Add(source.Name);
                 state.Hits.Add(new ContactHit
                 {
-                    Sender = pair.Key,
-                    Shape = pair.Value,
+                    Sender = source,
+                    Shape = source.Shape,
                     Proximity = proximity,
                     Gap = gap,
                     TagBits = tagBits,
@@ -1536,14 +1963,19 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
             // Ordem decrescente de proximidade, como no buffer do VRChat.
             state.Hits.Sort((a, b) => b.Proximity != a.Proximity ? b.Proximity.CompareTo(a.Proximity) : a.Gap.CompareTo(b.Gap));
-            var colliding = state.Hits.Count > 0;
+            var touched = TouchProximity(receiverShape, receiverTags, out var touchProximity);
+            if (touched)
+            {
+                state.Senders.Add("Mouse");
+            }
+            var colliding = state.Hits.Count > 0 || touched;
             if (colliding && !state.Colliding)
             {
                 state.EnterTime = now;
             }
             state.Colliding = colliding;
             state.PreviousProximity = state.Proximity;
-            state.Proximity = colliding ? state.Hits[0].Proximity : 0f;
+            state.Proximity = Mathf.Max(state.Hits.Count > 0 ? state.Hits[0].Proximity : 0f, touched ? touchProximity : 0f);
 
             var contactValue = Field(receiver, "paramValue", 1f);
             if (kind == 2)
@@ -1571,9 +2003,9 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             }
         }
 
-        foreach (var pair in senderShapes)
+        foreach (var source in sources)
         {
-            previousSenderPositions[pair.Key] = pair.Value.Center;
+            previousSenderPositions[source.Key] = source.Shape.Center;
         }
         foreach (var receiver in receivers)
         {
@@ -1582,6 +2014,101 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 previousSenderPositions[receiver] = ContactShape(receiver).Center;
             }
         }
+    }
+
+    private static ContactSource SourceFor(Component sender)
+    {
+        return new ContactSource
+        {
+            Component = sender,
+            Name = sender.name,
+            Root = RootOf(sender),
+            Avatar = AvatarRoot(sender.transform),
+            HasDescriptor = avatarDescriptorType != null && sender.GetComponentInParent(avatarDescriptorType, true) != null,
+            Tags = Field<List<string>>(sender, "collisionTags"),
+            LocalPosition = Field(sender, "position", Vector3.zero),
+            LocalRotation = Field(sender, "rotation", Quaternion.identity),
+            Shape = ContactShape(sender),
+        };
+    }
+
+    private void CollectAvatarSources()
+    {
+        avatarSources.Clear();
+        var avatars = new List<Component>();
+        CollectComponents(avatarDescriptorType, avatars);
+        foreach (var avatar in avatars)
+        {
+            var animator = avatar.GetComponent<Animator>();
+            if (animator == null || !animator.isHuman)
+            {
+                continue;
+            }
+            foreach (var (bone, field, tags) in AvatarColliders)
+            {
+                var transform = animator.GetBoneTransform(bone);
+                var config = Field<object>(avatar, field);
+                if (transform == null || config == null || Convert.ToString(Field<object>(config, "state")) == "Disabled")
+                {
+                    continue;
+                }
+                var radius = Field(config, "radius", 0f);
+                if (radius <= 0f)
+                {
+                    continue;
+                }
+                avatarSources.Add(new ContactSource
+                {
+                    Name = field.Substring("collider_".Length),
+                    Root = transform,
+                    Avatar = avatar.transform,
+                    HasDescriptor = true,
+                    Tags = tags.ToList(),
+                    LocalPosition = Field(config, "position", Vector3.zero),
+                    LocalRotation = Field(config, "rotation", Quaternion.identity),
+                    Radius = radius,
+                    Height = Field(config, "height", 0f),
+                });
+            }
+        }
+    }
+
+    // Enquanto o botão está pressionado, o raio do mouse aciona o receiver, como o Clickable Contacts do Gesture Manager.
+    private bool TouchProximity(Shape receiver, List<string> tags, out float proximity)
+    {
+        proximity = 0f;
+        var tag = touchTag.Trim();
+        return touching && (tag.Length == 0 || tags.Contains(tag)) && TryRayProximity(touchRay, receiver, out proximity, out _);
+    }
+
+    private static bool TryRayProximity(Ray ray, Shape shape, out float proximity, out float distance)
+    {
+        proximity = 0f;
+        distance = float.MaxValue;
+        var end = ray.GetPoint(1000f);
+        if (shape.Kind == 2)
+        {
+            var toLocal = Quaternion.Inverse(shape.Rotation);
+            var localRay = new Ray(toLocal * (ray.origin - shape.Center), toLocal * ray.direction);
+            if (!new Bounds(Vector3.zero, shape.HalfSize * 2f).IntersectRay(localRay, out distance))
+            {
+                return false;
+            }
+            var half = Vector3.Max(shape.HalfSize, Vector3.one * 1e-5f);
+            var closest = localRay.GetPoint(Vector3.Dot(-localRay.origin, localRay.direction));
+            proximity = 1f - Mathf.Clamp01(Mathf.Max(Mathf.Abs(closest.x) / half.x, Mathf.Abs(closest.y) / half.y, Mathf.Abs(closest.z) / half.z));
+            return true;
+        }
+
+        ClosestSegmentPoints(ray.origin, end, shape.A, shape.B, out var onRay, out var onShape);
+        var gap = Vector3.Distance(onRay, onShape);
+        if (gap > shape.Radius)
+        {
+            return false;
+        }
+        distance = Vector3.Distance(ray.origin, onRay);
+        proximity = shape.Radius > 1e-5f ? 1f - gap / shape.Radius : 1f;
+        return true;
     }
 
     private static bool TryContactProximity(Shape sender, Shape receiver, bool faceProximity, out float proximity, out float gap)
@@ -1649,13 +2176,12 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         }
 
         var nearest = state.Hits[0];
-        var hasDescriptor = avatarDescriptorType != null && nearest.Sender.GetComponentInParent(avatarDescriptorType, true) != null;
-        state.SenderType = hasDescriptor ? (nearest.SameAvatar ? 1 : 2) : 3;
+        state.SenderType = nearest.Sender.HasDescriptor ? (nearest.SameAvatar ? 1 : 2) : 3;
         var toLocal = Quaternion.Inverse(receiverShape.Rotation);
         state.SenderLocalPosition = toLocal * (nearest.Shape.Center - receiverShape.Center);
-        state.SenderLossyScale = RootOf(nearest.Sender).lossyScale;
+        state.SenderLossyScale = nearest.Sender.Root.lossyScale;
 
-        var senderVelocity = previousSenderPositions.TryGetValue(nearest.Sender, out var previousSender)
+        var senderVelocity = previousSenderPositions.TryGetValue(nearest.Sender.Key, out var previousSender)
             ? (nearest.Shape.Center - previousSender) / deltaTime
             : Vector3.zero;
         var receiverVelocity = previousSenderPositions.TryGetValue(receiver, out var previousReceiver)
@@ -1705,7 +2231,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             var hit = state.Hits[i];
             transforms[i] = ContactShapeMatrix(hit.Sender);
             data[i] = new Vector4(
-                BitConverter.Int32BitsToSingle(PlayerId(AvatarRoot(hit.Sender.transform))),
+                BitConverter.Int32BitsToSingle(PlayerId(hit.Sender.Avatar)),
                 BitConverter.Int32BitsToSingle(writeTags ? unchecked((int)hit.TagBits) : 0),
                 0f,
                 0f);
@@ -1749,13 +2275,9 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         }
     }
 
-    private static Matrix4x4 ContactShapeMatrix(Component contact)
+    private static Matrix4x4 ContactShapeMatrix(ContactSource source)
     {
-        var local = Matrix4x4.TRS(
-            Field(contact, "position", Vector3.zero),
-            Field(contact, "rotation", Quaternion.identity),
-            Vector3.one);
-        return RootOf(contact).localToWorldMatrix * local;
+        return source.Root.localToWorldMatrix * Matrix4x4.TRS(source.LocalPosition, source.LocalRotation, Vector3.one);
     }
 
     private int PlayerId(Transform avatar)
@@ -1823,10 +2345,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         simulatePhysBones = enabled;
         if (enabled)
         {
+            sdkFailure = null;
             RestartSimulation();
         }
         else
         {
+            EndGrab(false);
+            StopSdkSolver();
             RestoreAllChains();
             chains.Clear();
             ClearPosedState();
@@ -1841,6 +2366,11 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private void StepSimulation()
     {
         ApplyTestMotion();
+        if (sdkSolver != null)
+        {
+            StepSdkSolver();
+            return;
+        }
         foreach (var chain in chains.Where(chain => !chain.FollowsLink))
         {
             StepChain(chain);
@@ -2693,6 +3223,8 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
     private void RestartSimulation()
     {
+        EndGrab(false);
+        StopSdkSolver();
         RestoreAllChains();
         chains.Clear();
         ClearPosedState();
@@ -2702,9 +3234,10 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         BuildMotionRigs();
         BuildArmatureLinks();
         var linkedProps = new HashSet<Transform>(linkedBones.Select(bone => bone.Prop));
+        var roots = PhysBoneRoots();
         foreach (var bone in physBones)
         {
-            var chain = BuildChain(bone);
+            var chain = BuildChain(bone, roots);
             if (chain != null)
             {
                 for (var parent = chain.Root; parent != null && !chain.FollowsLink; parent = parent.parent)
@@ -2716,10 +3249,139 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         }
         simulationAccumulator = 0f;
         lastSimulationTime = EditorApplication.timeSinceStartup;
+        StartSdkSolver();
+    }
+
+    private void StartSdkSolver()
+    {
+        if (sdkFailure != null || chains.Count == 0)
+        {
+            return;
+        }
+        sdkRestPose.Clear();
+        foreach (var transform in chains.SelectMany(chain => chain.Root.GetComponentsInChildren<Transform>(true)).Distinct())
+        {
+            sdkRestPose.Add(new SavedBone { Transform = transform, LocalPosition = transform.localPosition, LocalRotation = transform.localRotation });
+        }
+        var bones = chains.Select(chain => chain.Bone).ToList();
+        var linked = bones.SelectMany(bone => (Field<IList>(bone, "colliders") ?? new object[0]).OfType<Component>());
+        sdkSolver = SdkSolver.TryStart(bones, colliders.Concat(linked).Where(collider => collider != null).Distinct().ToList(), out sdkFailure);
+    }
+
+    private void StopSdkSolver()
+    {
+        pendingConfiguration.Clear();
+        sdkGrab = null;
+        sdkSolver?.Stop();
+        sdkSolver = null;
+        // Constraints da Unity no avatar só voltam à pose de repouso quando o player loop roda de novo.
+        EditorApplication.QueuePlayerLoopUpdate();
+    }
+
+    private void StepSdkSolver()
+    {
+        ApplyArmatureLinks();
+        try
+        {
+            foreach (var component in pendingConfiguration.Where(component => component != null))
+            {
+                sdkSolver.ApplyConfiguration(component);
+            }
+            pendingConfiguration.Clear();
+            sdkSolver.Tick();
+        }
+        catch (Exception exception)
+        {
+            sdkFailure = (exception.InnerException ?? exception).Message;
+            RestartSimulation();
+            return;
+        }
+        foreach (var chain in chains)
+        {
+            SyncChain(chain);
+        }
+    }
+
+    // Com o solver do SDK as transforms são a verdade: gizmos e valores saem delas.
+    private void SyncChain(Chain chain)
+    {
+        if (chain.Bone == null || chain.Root == null || chain.Particles.Any(particle => particle.Transform == null))
+        {
+            return;
+        }
+        var worlds = new Matrix4x4[chain.Particles.Count];
+        for (var i = 0; i < chain.Particles.Count; i++)
+        {
+            var particle = chain.Particles[i];
+            particle.Position = ParticleTransformPosition(chain, particle);
+            if (particle.Virtual)
+            {
+                particle.RestPosition = worlds[particle.Parent].MultiplyPoint3x4(particle.EndOffset);
+                continue;
+            }
+            var parent = i > 0
+                ? worlds[particle.Parent]
+                : particle.Transform.parent != null ? particle.Transform.parent.localToWorldMatrix : Matrix4x4.identity;
+            worlds[i] = parent * Matrix4x4.TRS(particle.RestLocalPosition, particle.RestLocalRotation, particle.Transform.localScale);
+            particle.RestPosition = worlds[i].MultiplyPoint3x4(Vector3.zero);
+        }
+        chain.Applied = true;
+        chain.Grabbed = sdkSolver.IsGrabbed(chain.Bone);
+        chain.Posed = sdkSolver.IsPosed(chain.Bone);
+        MeasureChain(chain);
+    }
+
+    // Vale para os dois solvers: _Angle olha o osso final, e _Stretch/_Squish o trecho mais perto do limite.
+    private static void MeasureChain(Chain chain)
+    {
+        var maxStretch = new BoneCurve(chain.Bone, "maxStretch", "maxStretchCurve");
+        var maxSquish = new BoneCurve(chain.Bone, "maxSquish", "maxSquishCurve");
+        var root = chain.Particles[0];
+        var end = root;
+        var stretch = 0f;
+        var squish = 0f;
+        for (var i = 1; i < chain.Particles.Count; i++)
+        {
+            var particle = chain.Particles[i];
+            var parent = chain.Particles[particle.Parent];
+            if (particle.Ratio > end.Ratio)
+            {
+                end = particle;
+            }
+            var rest = Vector3.Distance(particle.RestPosition, parent.RestPosition);
+            if (rest < 1e-6f)
+            {
+                continue;
+            }
+            var change = Vector3.Distance(particle.Position, parent.Position) / rest - 1f;
+            var stretchLimit = maxStretch.At(particle.Ratio);
+            var squishLimit = maxSquish.At(particle.Ratio);
+            if (stretchLimit > 0f)
+            {
+                stretch = Mathf.Max(stretch, Mathf.Clamp01(change / stretchLimit));
+            }
+            if (squishLimit > 0f)
+            {
+                squish = Mathf.Max(squish, Mathf.Clamp01(-change / squishLimit));
+            }
+        }
+        chain.Stretch = stretch;
+        chain.Squish = squish;
+        chain.Angle = end == root ? 0f : Mathf.Clamp01(Vector3.Angle(end.RestPosition - root.RestPosition, end.Position - root.Position) / 180f);
     }
 
     private void RestoreAllChains()
     {
+        sdkSolver?.CompleteJob();
+        foreach (var saved in sdkRestPose.Where(saved => saved.Transform != null))
+        {
+            saved.Transform.localPosition = saved.LocalPosition;
+            saved.Transform.localRotation = saved.LocalRotation;
+        }
+        if (sdkSolver == null)
+        {
+            sdkRestPose.Clear();
+        }
         foreach (var chain in chains)
         {
             RestoreChain(chain);
@@ -2748,7 +3410,12 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         chain.Applied = false;
     }
 
-    private static Chain BuildChain(Component bone)
+    private HashSet<Transform> PhysBoneRoots()
+    {
+        return new HashSet<Transform>(physBones.Where(bone => bone != null).Select(RootOf));
+    }
+
+    private static Chain BuildChain(Component bone, HashSet<Transform> physBoneRoots)
     {
         if (bone == null)
         {
@@ -2756,6 +3423,10 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         }
         var root = RootOf(bone);
         var ignored = new HashSet<Transform>(Field<List<Transform>>(bone, "ignoreTransforms") ?? new List<Transform>());
+        if (Field(bone, "ignoreOtherPhysBones", true))
+        {
+            ignored.UnionWith(physBoneRoots.Where(other => other != root));
+        }
         var endpoint = Field(bone, "endpointPosition", Vector3.zero);
         var chain = new Chain { Bone = bone, Root = root };
         var depths = new List<int>();
@@ -2777,7 +3448,24 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         chain.LastRootPosition = root.position;
         var avatar = AvatarRoot(root);
         chain.LastAvatarPosition = avatar != null ? avatar.position : root.position;
+        ApplyMultiChild(chain, EnumField(bone, "multiChildType"));
         return chain.Particles.Count > 1 ? chain : null;
+    }
+
+    // Com vários filhos na raiz, Ignore deixa a raiz parada e cada filho inicia a própria cadeia; First faz isso
+    // com todos menos o primeiro, que continua da raiz; Average mantém todos ligados à raiz.
+    private static void ApplyMultiChild(Chain chain, int multiChild)
+    {
+        var children = chain.Particles[0].Children;
+        if (children.Count < 2 || multiChild == 2)
+        {
+            return;
+        }
+        chain.RootStill = multiChild == 0;
+        foreach (var child in children.Skip(multiChild == 1 ? 1 : 0))
+        {
+            chain.Particles[child].Pinned = true;
+        }
     }
 
     private static void AddParticles(
@@ -2877,13 +3565,10 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         var radiusCurve = new BoneCurve(bone, "radius", "radiusCurve");
         var maxAngleXCurve = new BoneCurve(bone, "maxAngleX", "maxAngleXCurve");
         var maxAngleZCurve = new BoneCurve(bone, "maxAngleZ", "maxAngleZCurve");
-        var maxStretch = Mathf.Max(0f, Field(bone, "maxStretch", 0f));
-        var maxSquish = Mathf.Clamp01(Field(bone, "maxSquish", 0f));
-        var stretchMotion = Mathf.Clamp01(Field(bone, "stretchMotion", 0f));
-        var strongestStretch = 0f;
-        var strongestSquish = 0f;
+        var maxStretchCurve = new BoneCurve(bone, "maxStretch", "maxStretchCurve");
+        var maxSquishCurve = new BoneCurve(bone, "maxSquish", "maxSquishCurve");
+        var stretchMotionCurve = new BoneCurve(bone, "stretchMotion", "stretchMotionCurve");
         var limitType = EnumField(bone, "limitType");
-        var limitRotation = Field(bone, "limitRotation", Vector3.zero);
         var collidersList = Field<IList>(bone, "colliders");
         var colliderShapes = new List<Shape>();
         if (collidersList != null)
@@ -2896,20 +3581,31 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 }
             }
         }
-        var canGrab = EnumField(bone, "allowGrabbing") != 0;
+        var canGrab = AllowedForSelf(bone, "allowGrabbing", "grabFilter");
         chain.Grabbed = false;
 
         var root = chain.Particles[0];
         root.Position = root.RestPosition;
         root.PreviousPosition = root.RestPosition;
 
-        var grabPath = grabbedChain == chain && canGrab && grabbedParticle > 0 && grabbedParticle < chain.Particles.Count
-            ? SolveGrabPath(chain, grabbedPosition)
-            : null;
+        var isGrabbedChain = grabbedChain == chain && canGrab && grabbedParticle > 0 && grabbedParticle < chain.Particles.Count;
+        if (isGrabbedChain)
+        {
+            // Grab Movement: 0 chega ao ponto pela força do Pull; 1 vai direto.
+            var rate = Mathf.Lerp(0.02f, 0.6f, Mathf.Clamp01(pullCurve.At(chain.Particles[grabbedParticle].Ratio)));
+            grabbedPosition = Vector3.Lerp(grabbedPosition, grabbedTarget, Mathf.Lerp(rate, 1f, Mathf.Clamp01(Field(bone, "grabMovement", 0.5f))));
+        }
+        var grabPath = isGrabbedChain ? SolveGrabPath(chain, grabbedPosition) : null;
 
         for (var i = 1; i < chain.Particles.Count; i++)
         {
             var particle = chain.Particles[i];
+            if (particle.Pinned)
+            {
+                particle.Position = particle.RestPosition;
+                particle.PreviousPosition = particle.RestPosition;
+                continue;
+            }
             var parent = chain.Particles[particle.Parent];
             var onGrabPath = grabPath != null && grabPath.Contains(i);
             var ratio = particle.Ratio;
@@ -2937,14 +3633,22 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 continue;
             }
             restDirection /= length;
-            var hangAmount = Mathf.Clamp(gravity * (1f - falloff * Mathf.Max(0f, Vector3.Dot(restDirection, Vector3.down))), -1f, 1f);
+            // Gravity Falloff tira a gravidade na pose de repouso; longe dela, a gravidade volta.
+            var currentDirection = (particle.Position - parent.Position).normalized;
+            var awayFromRest = 1f - Mathf.Max(0f, Vector3.Dot(currentDirection, restDirection));
+            var hangAmount = Mathf.Clamp(gravity * Mathf.Lerp(1f, awayFromRest, falloff), -1f, 1f);
             var goalDirection = hangAmount >= 0f
                 ? Vector3.Slerp(restDirection, Vector3.down, hangAmount)
                 : Vector3.Slerp(restDirection, Vector3.up, -hangAmount);
             var goal = parent.Position + goalDirection * length;
-            // Só o arraste estica por inteiro; em movimento livre, vale a fração de Stretch Motion.
+            // Arraste e colisão usam o limite inteiro; em movimento livre, vale a fração de Stretch Motion.
+            var maxStretch = Mathf.Max(0f, maxStretchCurve.At(ratio));
+            var maxSquish = Mathf.Clamp01(maxSquishCurve.At(ratio));
+            var stretchMotion = Mathf.Clamp01(stretchMotionCurve.At(ratio));
             var longest = length * (1f + maxStretch * (onGrabPath ? 1f : stretchMotion));
-            var shortest = length * (1f - maxSquish);
+            var shortest = length * (1f - maxSquish * (onGrabPath ? 1f : stretchMotion));
+            var fullLongest = length * (1f + maxStretch);
+            var fullShortest = length * (1f - maxSquish);
 
             if (onGrabPath)
             {
@@ -2977,7 +3681,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             if (limitType != 0)
             {
                 var frame = parent.Virtual ? Quaternion.identity : parent.Transform.rotation;
-                var limitFrame = frame * Quaternion.Euler(limitRotation);
+                var limitFrame = frame * Quaternion.Euler(LimitRotationAt(bone, ratio));
                 var limitDirection = limitFrame * Quaternion.Inverse(frame) * restDirection;
                 var maxX = maxAngleXCurve.At(ratio);
                 var maxZ = maxAngleZCurve.At(ratio);
@@ -2986,33 +3690,17 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 particle.Position = parent.Position + direction.normalized * limbLength;
             }
 
+            var beforeCollision = particle.Position;
             foreach (var shape in colliderShapes)
             {
-                PushOutOfCollider(shape, ref particle.Position, radius);
+                PushBoneOutOfCollider(shape, parent.Position, ref particle.Position, radius);
             }
-            ConstrainLength(parent.Position, ref particle.Position, shortest, longest);
-
-            var currentLength = Vector3.Distance(particle.Position, parent.Position);
-            if (maxStretch > 0f)
-            {
-                strongestStretch = Mathf.Max(strongestStretch, Mathf.Clamp01((currentLength / length - 1f) / maxStretch));
-            }
-            if (maxSquish > 0f)
-            {
-                strongestSquish = Mathf.Max(strongestSquish, Mathf.Clamp01((1f - currentLength / length) / maxSquish));
-            }
+            var collided = particle.Position != beforeCollision;
+            ConstrainLength(parent.Position, ref particle.Position, collided ? fullShortest : shortest, collided ? fullLongest : longest);
         }
 
-        chain.Stretch = strongestStretch;
-        chain.Squish = strongestSquish;
         ApplyRotations(chain);
-        var first = chain.Particles[0].Children.Count > 0 ? chain.Particles[chain.Particles[0].Children[0]] : null;
-        if (first != null)
-        {
-            var rest = first.RestPosition - chain.Particles[0].RestPosition;
-            var simulated = first.Position - chain.Particles[0].Position;
-            chain.Angle = Mathf.Clamp01(Vector3.Angle(rest, simulated) / 180f);
-        }
+        MeasureChain(chain);
     }
 
     // FABRIK no caminho raiz → osso agarrado: puxa os ossos anteriores com a raiz fixa.
@@ -3060,9 +3748,26 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         position = distance > 1e-6f ? parent + offset / distance * Mathf.Clamp(distance, shortest, longest) : position;
     }
 
+    private static bool AllowedForSelf(Component bone, string mode, string filter)
+    {
+        var value = EnumField(bone, mode);
+        return value == 2 ? Field(Field<object>(bone, filter), "allowSelf", true) : value != 0;
+    }
+
+    private static Vector3 LimitRotationAt(Component bone, float ratio)
+    {
+        if (calcLimitRotation == null)
+        {
+            calcLimitRotation = physBoneType?.GetMethod("CalcLimitRotation", new[] { typeof(float) });
+        }
+        return calcLimitRotation != null
+            ? (Vector3)calcLimitRotation.Invoke(bone, new object[] { ratio })
+            : Field(bone, "limitRotation", Vector3.zero);
+    }
+
     private void StartPose(Chain chain)
     {
-        if (EnumField(chain.Bone, "allowPosing") == 0)
+        if (!AllowedForSelf(chain.Bone, "allowPosing", "poseFilter"))
         {
             return;
         }
@@ -3115,6 +3820,36 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         PushOutOfCollider(new Shape { Kind = 0, Center = Vector3.zero, Rotation = Quaternion.identity, Radius = 1f }, ref outside, 0.1f);
         Check("collider push", Mathf.Abs(outside.magnitude - 1.1f) < 0.001f);
 
+        var sphere = new Shape { Kind = 0, Center = new Vector3(0.5f, 0.05f, 0f), A = new Vector3(0.5f, 0.05f, 0f), B = new Vector3(0.5f, 0.05f, 0f), Rotation = Quaternion.identity, Radius = 0.1f };
+        var tip = new Vector3(1f, 0f, 0f);
+        PushBoneOutOfCollider(sphere, Vector3.zero, ref tip, 0f);
+        ClosestSegmentPoints(Vector3.zero, tip, sphere.A, sphere.B, out var onBone, out var onSphere);
+        Check("a collider between two bones pushes the bone", tip.y < 0f && Vector3.Distance(onBone, onSphere) > 0.09f);
+        sphere.BonesAsSpheres = true;
+        var untouched = new Vector3(1f, 0f, 0f);
+        PushBoneOutOfCollider(sphere, Vector3.zero, ref untouched, 0f);
+        Check("Bones As Sphere only tests the bone position", untouched == new Vector3(1f, 0f, 0f));
+
+        Chain Branches(int multiChild)
+        {
+            var chain = new Chain();
+            chain.Particles.Add(new Particle { Parent = -1 });
+            chain.Particles.Add(new Particle { Parent = 0 });
+            chain.Particles.Add(new Particle { Parent = 0 });
+            chain.Particles[0].Children.Add(1);
+            chain.Particles[0].Children.Add(2);
+            ApplyMultiChild(chain, multiChild);
+            return chain;
+        }
+        var ignore = Branches(0);
+        Check("Multi-Child Ignore keeps the root still", ignore.RootStill && ignore.Particles[1].Pinned && ignore.Particles[2].Pinned);
+        var firstChild = Branches(1);
+        Check("Multi-Child First continues the first child", !firstChild.RootStill && !firstChild.Particles[1].Pinned && firstChild.Particles[2].Pinned);
+        var average = Branches(2);
+        Check("Multi-Child Average keeps every child", !average.RootStill && !average.Particles[1].Pinned && !average.Particles[2].Pinned);
+
+        Check("ray proximity", TryRayProximity(new Ray(new Vector3(0f, 0f, -1f), Vector3.forward), new Shape { Kind = 0, Radius = 0.5f, Rotation = Quaternion.identity }, out var rayProximity, out _) && Mathf.Approximately(rayProximity, 1f));
+
         var curve = new BoneCurve(null, "pull", "pullCurve") { Value = 2f, Curve = AnimationCurve.Linear(0f, 0f, 1f, 1f) };
         Check("curves multiply the value", Mathf.Approximately(curve.At(0.5f), 1f));
 
@@ -3125,9 +3860,14 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
 
         ResolveTypes();
         Check("SDK types resolve", physBoneType != null && contactType != null && constraintType != null);
-        foreach (var field in new[] { "immobileType", "integrationType", "maxStretch", "maxSquish", "stretchMotion", "allowPosing", "multiChildType" })
+        foreach (var field in new[] { "immobileType", "integrationType", "maxStretch", "maxStretchCurve", "maxSquish", "maxSquishCurve", "stretchMotion", "stretchMotionCurve", "allowPosing", "multiChildType", "ignoreOtherPhysBones", "grabMovement", "grabFilter", "poseFilter", "chainId" })
         {
             Check("PhysBone field " + field, physBoneType == null || GetField(physBoneType, field) != null);
+        }
+        Check("Collider field bonesAsSpheres", colliderType == null || GetField(colliderType, "bonesAsSpheres") != null);
+        foreach (var (_, field, _) in AvatarColliders)
+        {
+            Check("Descriptor field " + field, avatarDescriptorType == null || GetField(avatarDescriptorType, field) != null);
         }
 
         if (failures.Count > 0)
@@ -3173,6 +3913,30 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         return Vector3.RotateTowards(limitDirection, direction, allowed * Mathf.Deg2Rad, 0f);
     }
 
+    // O osso é uma cápsula do pai ao filho, então um collider entre os dois pontos também o empurra. Como o pai
+    // fica parado, o filho anda mais que o ponto de contato, na proporção da alavanca.
+    private static void PushBoneOutOfCollider(Shape shape, Vector3 parent, ref Vector3 position, float radius)
+    {
+        if (shape.Kind == 3 || shape.Inside || shape.BonesAsSpheres)
+        {
+            PushOutOfCollider(shape, ref position, radius);
+            return;
+        }
+
+        ClosestSegmentPoints(parent, position, shape.A, shape.B, out var onBone, out var onShape);
+        var offset = onBone - onShape;
+        var distance = offset.magnitude;
+        var reach = shape.Radius + radius;
+        if (distance >= reach)
+        {
+            return;
+        }
+        var direction = distance > 1e-6f ? offset / distance : shape.Rotation * Vector3.forward;
+        var length = Vector3.Distance(parent, position);
+        var lever = length > 1e-6f ? Mathf.Max(Vector3.Distance(parent, onBone) / length, MinimumLever) : 1f;
+        position += direction * ((reach - distance) / lever);
+    }
+
     private static void PushOutOfCollider(Shape shape, ref Vector3 position, float radius)
     {
         if (shape.Kind == 3)
@@ -3207,9 +3971,19 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private static void ApplyRotations(Chain chain)
     {
         var multiChild = EnumField(chain.Bone, "multiChildType");
-        foreach (var particle in chain.Particles)
+        for (var index = 0; index < chain.Particles.Count; index++)
         {
-            if (particle.Virtual || particle.Children.Count == 0)
+            var particle = chain.Particles[index];
+            if (particle.Virtual)
+            {
+                continue;
+            }
+            if (index > 0)
+            {
+                // Sem isto Stretch e Squish só apareceriam nos gizmos.
+                particle.Transform.position = particle.Position;
+            }
+            if (particle.Children.Count == 0 || (index == 0 && chain.RootStill))
             {
                 continue;
             }
@@ -3217,7 +3991,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             var origin = particle.Transform.position;
             var restVector = Vector3.zero;
             var simulatedVector = Vector3.zero;
-            var count = multiChild == 1 ? 1 : particle.Children.Count;
+            var count = index == 0 && multiChild == 1 ? 1 : particle.Children.Count;
             for (var i = 0; i < count; i++)
             {
                 var child = chain.Particles[particle.Children[i]];
@@ -3270,6 +4044,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                     DrawContact(sender, new Color(1f, 0.55f, 0.15f), null);
                 }
             }
+            if (avatarColliderContacts)
+            {
+                foreach (var source in avatarSources.Where(source => source.Root != null))
+                {
+                    DrawShape(CapsuleAt(source.Root, source.LocalPosition, source.LocalRotation, source.Radius, source.Height), new Color(1f, 0.55f, 0.15f, 0.6f));
+                }
+            }
             foreach (var receiver in receivers)
             {
                 if (receiver != null)
@@ -3292,19 +4073,29 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                         DrawChain(chain, true);
                     }
                 }
-                HandleGrab();
+                HandleGrab(sceneView);
             }
             else if (drawGizmos)
             {
+                var roots = PhysBoneRoots();
                 foreach (var bone in physBones)
                 {
-                    var chain = BuildChain(bone);
+                    var chain = BuildChain(bone, roots);
                     if (chain != null)
                     {
                         DrawChain(chain, false);
                     }
                 }
             }
+        }
+
+        if (showContacts && liveContacts && touchContacts)
+        {
+            HandleContactTouch();
+        }
+        else
+        {
+            touching = false;
         }
 
         if (showConstraints && drawGizmos)
@@ -3399,7 +4190,6 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     {
         var bone = chain.Bone;
         var limitType = EnumField(bone, "limitType");
-        var limitRotation = Field(bone, "limitRotation", Vector3.zero);
         foreach (var particle in chain.Particles)
         {
             var position = simulated ? particle.Position : particle.RestPosition;
@@ -3415,7 +4205,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 {
                     var restDirection = particle.RestPosition - parent.RestPosition;
                     var frame = parent.Transform.rotation;
-                    var limitFrame = frame * Quaternion.Euler(limitRotation);
+                    var limitFrame = frame * Quaternion.Euler(LimitRotationAt(bone, particle.Ratio));
                     var direction = limitFrame * Quaternion.Inverse(frame) * restDirection.normalized;
                     var maxX = new BoneCurve(bone, "maxAngleX", "maxAngleXCurve").At(particle.Ratio);
                     var maxZ = limitType == 3 ? new BoneCurve(bone, "maxAngleZ", "maxAngleZCurve").At(particle.Ratio) : maxX;
@@ -3473,54 +4263,181 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         }
     }
 
-    private void HandleGrab()
+    // Reproduz o PhysBoneGrabHelper do SDK: pega pelo raio do osso, arrasta no plano da câmera e o botão direito
+    // posa enquanto o esquerdo está pressionado.
+    private void HandleGrab(SceneView sceneView)
     {
         if (!allowGrab)
         {
-            grabbedChain = null;
+            EndGrab(false);
             return;
         }
 
-        Chain hitChain = null;
-        var hitIndex = -1;
-        var hitPosition = Vector3.zero;
-        foreach (var chain in chains)
+        var current = Event.current;
+        var controlId = GUIUtility.GetControlID(FocusType.Passive);
+        var ray = HandleUtility.GUIPointToWorldRay(current.mousePosition);
+        var camera = sceneView.camera.transform;
+        switch (current.GetTypeForControl(controlId))
         {
-            if (EnumField(chain.Bone, "allowGrabbing") == 0)
+            case EventType.Repaint:
+                DrawGrabMarkers();
+                break;
+            case EventType.Layout:
+                if (GUIUtility.hotControl == 0 && TryPickBone(ray, out _, out _))
+                {
+                    HandleUtility.AddControl(controlId, 0f);
+                }
+                break;
+            case EventType.MouseDown when current.button == 0 && !current.alt && HandleUtility.nearestControl == controlId:
+                if (TryPickBone(ray, out var chain, out var particle) && BeginGrab(ray, camera, chain, particle))
+                {
+                    GUIUtility.hotControl = controlId;
+                    current.Use();
+                }
+                break;
+            case EventType.MouseDown when current.button == 1 && GUIUtility.hotControl == controlId:
+                EndGrab(true);
+                GUIUtility.hotControl = 0;
+                current.Use();
+                break;
+            case EventType.MouseDrag when GUIUtility.hotControl == controlId:
+                MoveGrab(ray, camera);
+                current.Use();
+                break;
+            case EventType.MouseUp when current.button == 0 && GUIUtility.hotControl == controlId:
+                EndGrab(poseOnRelease);
+                GUIUtility.hotControl = 0;
+                current.Use();
+                break;
+        }
+    }
+
+    // Ficam visíveis mesmo com os Gizmos desligados, para achar os ossos que dá para pegar.
+    private void DrawGrabMarkers()
+    {
+        Handles.color = WithOpacity(Color.white, 0.6f);
+        foreach (var chain in chains.Where(chain => chain.Bone != null && AllowedForSelf(chain.Bone, "allowGrabbing", "grabFilter")))
+        {
+            foreach (var particle in chain.Particles.Skip(1))
             {
-                continue;
+                var size = HandleUtility.GetHandleSize(particle.Position) * 0.05f;
+                Handles.DotHandleCap(0, particle.Position, Quaternion.identity, size, EventType.Repaint);
             }
+        }
+    }
+
+    private bool TryPickBone(Ray ray, out Chain picked, out int particleIndex)
+    {
+        picked = null;
+        particleIndex = -1;
+        var nearest = float.MaxValue;
+        foreach (var chain in chains.Where(chain => chain.Bone != null && AllowedForSelf(chain.Bone, "allowGrabbing", "grabFilter")))
+        {
+            var radiusCurve = new BoneCurve(chain.Bone, "radius", "radiusCurve");
             for (var i = 1; i < chain.Particles.Count; i++)
             {
                 var particle = chain.Particles[i];
-                var size = HandleUtility.GetHandleSize(particle.Position) * 0.05f;
-                Handles.color = WithOpacity(Color.white, 0.6f);
-                var controlId = GUIUtility.GetControlID(FocusType.Passive);
-                var moved = Handles.FreeMoveHandle(controlId, particle.Position, size, Vector3.zero, Handles.DotHandleCap);
-                if (GUIUtility.hotControl == controlId)
+                ClosestSegmentPoints(ray.origin, ray.GetPoint(1000f), chain.Particles[particle.Parent].Position, particle.Position, out var onRay, out var onBone);
+                var reach = Mathf.Max(radiusCurve.At(particle.Ratio) * MaxScale(particle.Transform), HandleUtility.GetHandleSize(onBone) * PickPixels / 80f);
+                var depth = Vector3.Distance(ray.origin, onRay);
+                if (Vector3.Distance(onRay, onBone) <= reach && depth < nearest)
                 {
-                    hitChain = chain;
-                    hitIndex = i;
-                    hitPosition = moved;
+                    nearest = depth;
+                    picked = chain;
+                    particleIndex = i;
                 }
             }
         }
+        return picked != null;
+    }
 
-        if (hitChain != null)
+    private bool BeginGrab(Ray ray, Transform camera, Chain chain, int particle)
+    {
+        Vector3 origin;
+        if (sdkSolver != null)
         {
-            hitChain.Posed = false;
-            grabbedChain = hitChain;
-            grabbedParticle = hitIndex;
-            grabbedPosition = hitPosition;
-        }
-        else if (GUIUtility.hotControl == 0)
-        {
-            if (grabbedChain != null && poseOnRelease)
+            sdkGrab = sdkSolver.BeginGrab(ray, chain, particle, out origin);
+            if (sdkGrab == null)
             {
-                StartPose(grabbedChain);
+                return false;
             }
-            grabbedChain = null;
-            grabbedParticle = -1;
+        }
+        else
+        {
+            origin = chain.Particles[particle].Position;
+            chain.Posed = false;
+        }
+        grabbedChain = chain;
+        grabbedParticle = particle;
+        grabbedPosition = origin;
+        grabbedTarget = origin;
+        grabOriginLocal = camera.InverseTransformPoint(origin);
+        return true;
+    }
+
+    private void MoveGrab(Ray ray, Transform camera)
+    {
+        var plane = new Plane(-camera.forward, camera.TransformPoint(grabOriginLocal));
+        if (!plane.Raycast(ray, out var enter))
+        {
+            return;
+        }
+        var point = ray.GetPoint(enter);
+        grabbedTarget = point;
+        if (sdkGrab != null)
+        {
+            grabbedPosition = point;
+            sdkSolver?.MoveGrab(sdkGrab, point);
+        }
+    }
+
+    private void EndGrab(bool pose)
+    {
+        if (grabbedChain == null)
+        {
+            return;
+        }
+        if (sdkGrab != null)
+        {
+            sdkSolver?.ReleaseGrab(sdkGrab, pose);
+        }
+        else if (pose)
+        {
+            StartPose(grabbedChain);
+        }
+        sdkGrab = null;
+        grabbedChain = null;
+        grabbedParticle = -1;
+    }
+
+    private void HandleContactTouch()
+    {
+        var current = Event.current;
+        var controlId = GUIUtility.GetControlID(FocusType.Passive);
+        var ray = HandleUtility.GUIPointToWorldRay(current.mousePosition);
+        switch (current.GetTypeForControl(controlId))
+        {
+            case EventType.Layout:
+                if (GUIUtility.hotControl == 0 && receivers.Any(receiver => receiver != null && TryRayProximity(ray, ContactShape(receiver), out _, out _)))
+                {
+                    HandleUtility.AddControl(controlId, 0f);
+                }
+                break;
+            case EventType.MouseDown when current.button == 0 && !current.alt && HandleUtility.nearestControl == controlId:
+                GUIUtility.hotControl = controlId;
+                touching = true;
+                touchRay = ray;
+                current.Use();
+                break;
+            case EventType.MouseDrag when GUIUtility.hotControl == controlId:
+                touchRay = ray;
+                current.Use();
+                break;
+            case EventType.MouseUp when GUIUtility.hotControl == controlId:
+                GUIUtility.hotControl = 0;
+                touching = false;
+                current.Use();
+                break;
         }
     }
 
