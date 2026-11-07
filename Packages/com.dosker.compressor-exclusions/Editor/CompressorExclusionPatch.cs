@@ -24,7 +24,7 @@ namespace CompressorExclusions {
         private const string MenuMethodName = "GetParamsUsedInMenu";
         private const string LogPrefix = "[Compressor Exclusions]";
         // Same version as scripts/vrcfury_compat.json
-        private const string TestedVrcfury = "1.1436.0";
+        private const string TestedVrcfury = "1.1442.0";
 
         private static readonly ControlType[] MenuControls = {
             ControlType.RadialPuppet,
@@ -79,17 +79,21 @@ namespace CompressorExclusions {
 
             VrcfuryVersion = PackageInfo.FindForAssembly(solverType.Assembly)?.version ?? "?";
 
+            // VRCFury 1.1437.0 changed paramz from the asset to a list of its parameters
             var innerMethod = AccessTools.GetDeclaredMethods(solverType).FirstOrDefault(method =>
                 method.Name == SolverMethodName
-                && method.GetParameters().FirstOrDefault()?.ParameterType == typeof(VRCExpressionParameters));
+                && IsParamsType(method.GetParameters().FirstOrDefault()?.ParameterType));
             if (innerMethod == null) {
-                throw new Exception($"Método {SolverMethodName}(VRCExpressionParameters, ...) não encontrado.");
+                throw new Exception($"Método {SolverMethodName}(paramz, ...) não encontrado.");
             }
 
             CheckSolverShape(innerMethod);
 
+            var prefix = innerMethod.GetParameters()[0].ParameterType == typeof(VRCExpressionParameters)
+                ? nameof(LegacySolverPrefix)
+                : nameof(SolverPrefix);
             var harmony = new Harmony("compressor-exclusions");
-            harmony.Patch(innerMethod, prefix: new HarmonyMethod(Method(nameof(SolverPrefix))));
+            harmony.Patch(innerMethod, prefix: new HarmonyMethod(Method(prefix)));
 
             // Everything below only feeds reports and control rules, so failing here must not stop the protections
             menuMethod = AccessTools.GetDeclaredMethods(solverType).FirstOrDefault(method =>
@@ -133,36 +137,67 @@ namespace CompressorExclusions {
             if (missing.Count > 0) throw new Exception($"O resultado do solver não tem mais: {string.Join(", ", missing)}.");
         }
 
+        private static bool IsParamsType(Type type) {
+            return type == typeof(VRCExpressionParameters) || type == typeof(IEnumerable<VRCExpressionParameters.Parameter>);
+        }
+
         private static MethodInfo Method(string name) {
             return typeof(CompressorExclusionPatch).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic);
         }
 
+        // VRCFury 1.1437.0 and newer
         private static void SolverPrefix(
             object __instance,
+            ref IEnumerable<VRCExpressionParameters.Parameter> paramz,
+            ISet<string> addDriven,
+            int originalCost
+        ) {
+            var filtered = Filter(__instance, paramz, addDriven, originalCost);
+            if (filtered != null) paramz = filtered;
+        }
+
+        // VRCFury 1.1436.0 and older, where paramz is the asset itself
+        private static void LegacySolverPrefix(
+            object __instance,
             ref VRCExpressionParameters paramz,
+            ISet<string> addDriven,
+            int originalCost
+        ) {
+            var filtered = Filter(__instance, paramz.parameters, addDriven, originalCost);
+            if (filtered == null) return;
+
+            if (filteredParams == null) {
+                filteredParams = ScriptableObject.CreateInstance<VRCExpressionParameters>();
+                filteredParams.hideFlags = HideFlags.HideAndDontSave;
+            }
+            filteredParams.parameters = filtered;
+            paramz = filteredParams;
+        }
+
+        /**
+         * Returns the parameters the solver may compress, or null when the protections are off.
+         */
+        private static VRCExpressionParameters.Parameter[] Filter(
+            object solver,
+            IEnumerable<VRCExpressionParameters.Parameter> paramz,
             ISet<string> addDriven,
             int originalCost
         ) {
             var settings = CompressorExclusionSettings.Instance;
 
             // The solver calls this once per attempt, and each build gets a new solver
-            if (!ReferenceEquals(__instance, currentSolver)) {
-                currentSolver = __instance;
-                currentControls = ReadMenuControls(__instance);
-                currentMenuPaths = ReadMenuPaths(__instance);
-                Report(__instance, settings, paramz, addDriven, originalCost);
+            if (!ReferenceEquals(solver, currentSolver)) {
+                currentSolver = solver;
+                currentControls = ReadMenuControls(solver);
+                currentMenuPaths = ReadMenuPaths(solver);
+                Report(solver, settings, paramz, addDriven, originalCost);
             }
 
-            if (!settings.active) return;
+            if (!settings.active) return null;
 
-            if (filteredParams == null) {
-                filteredParams = ScriptableObject.CreateInstance<VRCExpressionParameters>();
-                filteredParams.hideFlags = HideFlags.HideAndDontSave;
-            }
-            filteredParams.parameters = paramz.parameters
+            return paramz
                 .Where(p => !CompressorPolicy.Evaluate(settings, p.name, p.valueType, ControlOf(p.name), MenuPathOf(p.name)).isProtected)
                 .ToArray();
-            paramz = filteredParams;
         }
 
         private static int ControlOf(string paramName) {
@@ -210,12 +245,12 @@ namespace CompressorExclusions {
         private static void Report(
             object solver,
             CompressorExclusionSettings settings,
-            VRCExpressionParameters paramz,
+            IEnumerable<VRCExpressionParameters.Parameter> paramz,
             ISet<string> addDriven,
             int originalCost
         ) {
             try {
-                var synced = paramz.parameters.Where(p => p.networkSynced).ToList();
+                var synced = paramz.Where(p => p.networkSynced).ToList();
                 var snapshot = NewSnapshot(solver, settings);
                 snapshot.needsCompression = true;
                 snapshot.originalCost = originalCost;
@@ -281,10 +316,8 @@ namespace CompressorExclusions {
             try {
                 currentControls = ReadMenuControls(solver);
                 currentMenuPaths = ReadMenuPaths(solver);
-                var paramz = Traverse.Create(solver).Field("paramsService").Method("GetReadOnlyParams")
-                    .GetValue<VRCExpressionParameters>();
-                snapshot.originalCost = paramz.CalcTotalCost();
-                snapshot.parameters = paramz.parameters.Where(p => p.networkSynced)
+                ReadBuildParams(solver, out var paramz, out snapshot.originalCost);
+                snapshot.parameters = paramz.Where(p => p.networkSynced)
                     .Select(p => ToSnapshotParam(p, new HashSet<string>()))
                     .ToList();
                 AddPredictions(snapshot, CompressorExclusionSettings.Instance);
@@ -297,6 +330,20 @@ namespace CompressorExclusions {
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             }
             return snapshot;
+        }
+
+        private static void ReadBuildParams(object solver, out IEnumerable<VRCExpressionParameters.Parameter> paramz, out int cost) {
+            var service = Traverse.Create(solver).Field("expressionParams");
+            if (service.FieldExists()) {
+                // VRCFury 1.1437.0 and newer
+                paramz = service.Method("GetSnapshot").GetValue<VRCExpressionParameters.Parameter[]>();
+                cost = service.Method("CalcTotalCost").GetValue<int>();
+                return;
+            }
+            var asset = Traverse.Create(solver).Field("paramsService").Method("GetReadOnlyParams")
+                .GetValue<VRCExpressionParameters>();
+            paramz = asset.parameters;
+            cost = asset.CalcTotalCost();
         }
 
         private static void SolverResultPostfix(object __instance, object __result) {

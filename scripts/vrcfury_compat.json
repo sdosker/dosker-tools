@@ -1,7 +1,7 @@
 {
-  "version": "1.1436.0",
+  "version": "1.1442.0",
   "files": {
-    "OptimizationDecision.cs": "8a6ee4f58ace46e91382dca10078df1fb55051fec448f0e299e57805c40207c5",
-    "ParameterCompressorSolverService.cs": "f8eed6bd1dbf031dfe984d7b512493e2a22a5b5e97633eecc15f284848af33ba"
+    "OptimizationDecision.cs": "c5b224ae4fe45e52e6b14b27bf5907f69cd19e71f56a163c6f0fb7bd2540dd49",
+    "ParameterCompressorSolverService.cs": "991465a73306844eb86e15d795ffb1b925dfba1363070b635d0270207edbcfa5"
   }
 }

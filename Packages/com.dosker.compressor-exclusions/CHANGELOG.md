@@ -10,6 +10,12 @@ Neste projeto, a versão muda assim:
 - **MINOR:** novo recurso compatível com a configuração existente.
 - **PATCH:** correção, incluindo adaptações a novas versões do VRCFury ou do SDK.
 
+## [1.2.1] - 2026-11-06
+
+### Corrigido
+
+- Compatibilidade com o VRCFury 1.1437.0, que mudou a forma como o solver recebe os parâmetros. Sem esta correção, o patch não era aplicado e o build era bloqueado. Versões anteriores do VRCFury continuam funcionando.
+
 ## [1.2.0] - 2026-11-01
 
 ### Adicionado

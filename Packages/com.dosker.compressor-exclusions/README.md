@@ -11,7 +11,7 @@ Com esta ferramenta, os parâmetros que você protege continuam sincronizando di
 ## Requisitos
 
 - Unity 2022.3 com VRChat Avatars SDK
-- VRCFury (testado na 1.1436.0), instalado pelo [listing oficial](https://vcc.vrcfury.com)
+- VRCFury (testado na 1.1442.0), instalado pelo [listing oficial](https://vcc.vrcfury.com)
 
 ## Instalar
 
