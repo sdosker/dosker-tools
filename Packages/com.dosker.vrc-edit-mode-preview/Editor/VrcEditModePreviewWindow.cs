@@ -1467,29 +1467,63 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             EditorGUILayout.LabelField("    ← " + string.Join(", ", state.Senders), EditorStyles.miniLabel);
         }
-        if (Field(receiver, "advancedParameters", false))
+        var advanced = AdvancedParameterFlags(receiver);
+        if (advanced != 0u)
         {
-            var tags = Field<List<string>>(receiver, "collisionTags") ?? new List<string>();
-            var tagText = string.Join(" ", tags.Select(t => string.Format("_CollisionTag_{0}={1}", t, state.MatchedTags.Contains(t) ? 1 : 0)));
-            EditorGUILayout.LabelField(
-                string.Format(
-                    "    _SenderType={0} · _SenderLocalPosition=({1:0.000}, {2:0.000}, {3:0.000}) · _SenderLossyScale=({4:0.##}, {5:0.##}, {6:0.##})\n" +
-                    "    _SenderVelocity=({7:0.00}, {8:0.00}, {9:0.00}) |{10:0.00}| · _PointSeparation={11:0.000} · _ProximitySpeed={12:0.00}\n    {13}",
-                    state.SenderType,
+            var prefix = parameter ?? string.Empty;
+            var lines = new List<string>();
+            if ((advanced & AdvancedSenderType) != 0u)
+            {
+                lines.Add(string.Format("{0}_SenderType = {1}", prefix, state.SenderType));
+            }
+            if ((advanced & AdvancedSenderLocalPosition) != 0u)
+            {
+                lines.Add(string.Format(
+                    "{0}_SenderLocalPosition X/Y/Z = {1:0.000}, {2:0.000}, {3:0.000}",
+                    prefix,
                     state.SenderLocalPosition.x,
                     state.SenderLocalPosition.y,
-                    state.SenderLocalPosition.z,
+                    state.SenderLocalPosition.z));
+            }
+            if ((advanced & AdvancedSenderLossyScale) != 0u)
+            {
+                lines.Add(string.Format(
+                    "{0}_SenderLossyScale X/Y/Z = {1:0.###}, {2:0.###}, {3:0.###}",
+                    prefix,
                     state.SenderLossyScale.x,
                     state.SenderLossyScale.y,
-                    state.SenderLossyScale.z,
+                    state.SenderLossyScale.z));
+            }
+            if ((advanced & AdvancedSenderVelocity) != 0u)
+            {
+                lines.Add(string.Format(
+                    "{0}_SenderVelocity X/Y/Z = {1:0.00}, {2:0.00}, {3:0.00} · Magnitude = {4:0.00}",
+                    prefix,
                     state.SenderVelocity.x,
                     state.SenderVelocity.y,
                     state.SenderVelocity.z,
-                    state.SenderVelocity.magnitude,
-                    state.PointSeparation,
-                    state.ProximitySpeed,
-                    tagText),
-                EditorStyles.wordWrappedMiniLabel);
+                    state.SenderVelocity.magnitude));
+            }
+            if ((advanced & AdvancedPointSeparation) != 0u)
+            {
+                lines.Add(string.Format("{0}_PointSeparation = {1:0.000}", prefix, state.PointSeparation));
+            }
+            if ((advanced & AdvancedProximitySpeed) != 0u)
+            {
+                lines.Add(string.Format("{0}_ProximitySpeed = {1:0.00}", prefix, state.ProximitySpeed));
+            }
+            if ((advanced & AdvancedCollisionTags) != 0u)
+            {
+                var tags = Field<List<string>>(receiver, "collisionTags") ?? new List<string>();
+                foreach (var tag in tags.Where(t => !string.IsNullOrEmpty(t)).Distinct())
+                {
+                    lines.Add(string.Format("{0}_CollisionTag_{1} = {2}", prefix, tag, state.MatchedTags.Contains(tag) ? 1 : 0));
+                }
+            }
+            foreach (var line in lines)
+            {
+                EditorGUILayout.LabelField("    " + line, EditorStyles.miniLabel);
+            }
         }
         if (!string.IsNullOrEmpty(state.ShaderName))
         {
@@ -1757,6 +1791,27 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         var field = GetField(target.GetType(), name);
         var value = field != null ? field.GetValue(target) : null;
         return value != null ? Convert.ToInt32(value) : 0;
+    }
+
+    // Valores de ContactReceiver.AdvancedParameter ([Flags]) no SDK.
+    private const uint AdvancedSenderType = 1u;
+    private const uint AdvancedSenderLocalPosition = 2u;
+    private const uint AdvancedSenderLossyScale = 4u;
+    private const uint AdvancedSenderVelocity = 8u;
+    private const uint AdvancedPointSeparation = 16u;
+    private const uint AdvancedProximitySpeed = 32u;
+    private const uint AdvancedCollisionTags = 0x80000000u;
+
+    // advancedParameters é um enum de flags; um SDK que o declare como bool liga todos.
+    private static uint AdvancedParameterFlags(Component receiver)
+    {
+        var field = receiver != null ? GetField(receiver.GetType(), "advancedParameters") : null;
+        var value = field != null ? field.GetValue(receiver) : null;
+        if (value is bool enabled)
+        {
+            return enabled ? uint.MaxValue : 0u;
+        }
+        return value != null ? unchecked((uint)Convert.ToInt64(value)) : 0u;
     }
 
     private static Transform RootOf(Component component)

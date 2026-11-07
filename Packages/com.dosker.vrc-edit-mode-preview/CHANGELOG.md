@@ -3,6 +3,14 @@
 Todas as mudanças relevantes deste pacote ficam neste arquivo. O formato segue o
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.8.2] - 2026-11-07
+
+### Corrigido
+
+- Os **Advanced Parameters** dos receivers voltam a aparecer na interface. O SDK guarda a opção como flags, e a janela
+  agora mostra só os parâmetros ativados, um por linha, com o nome que o animator recebe (`{parâmetro}_SenderType`,
+  `_SenderVelocity`, `_CollisionTag_{tag}` etc.).
+
 ## [0.8.1] - 2026-11-02
 
 ### Alterado
