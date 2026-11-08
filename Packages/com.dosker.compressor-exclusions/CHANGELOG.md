@@ -10,6 +10,12 @@ Neste projeto, a versão muda assim:
 - **MINOR:** novo recurso compatível com a configuração existente.
 - **PATCH:** correção, incluindo adaptações a novas versões do VRCFury ou do SDK.
 
+## [1.3.0] - 2026-11-08
+
+### Adicionado
+
+- Quando o avatar cabe sem compressão, a barra do topo mostra os bits usados, a porcentagem e quantos bits sobram, como na lista de parâmetros do SDK. Ela fica amarela acima de 90% do limite.
+
 ## [1.2.1] - 2026-11-06
 
 ### Corrigido

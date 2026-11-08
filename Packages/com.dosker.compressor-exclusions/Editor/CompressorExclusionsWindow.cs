@@ -63,6 +63,7 @@ namespace CompressorExclusions {
         private const int ForecastColumns = 3;
         private const int MaxNamesInTooltip = 30;
         private const int HistoryRows = 10;
+        private const float TightRatio = 0.9f;
         private const string SceneSuffix = " (cena)";
 
         private static readonly string[] ForecastRows = { "Comprimidos", "Protegidos", "Bits", "Lotes", "Atraso", "Cabe" };
@@ -732,8 +733,9 @@ namespace CompressorExclusions {
             }
 
             if (!snapshot.needsCompression) {
-                ShowBar(0, snapshot.maxCost, "");
-                barText.text = "Este avatar cabe no limite";
+                var free = snapshot.maxCost - snapshot.originalCost;
+                var used = snapshot.maxCost <= 0 ? 0 : Mathf.RoundToInt(100f * snapshot.originalCost / snapshot.maxCost);
+                ShowBar(snapshot.originalCost, snapshot.maxCost, $"{used}% usado · cabe sem compressão, sobram {free} bits");
                 ClearStats();
                 if (!ShowsSceneAvatar) {
                     AddBanner("info", "No último build o avatar coube sem compressão, então nada foi comprimido.");
@@ -746,6 +748,8 @@ namespace CompressorExclusions {
                 : $"melhor resultado possível com a escolha atual ({snapshot.originalCost} bits sem compressão)";
             ShowBar(estimate.finalCost, snapshot.maxCost, hint);
             barFill.EnableInClassList("ce-bar-fill--over", !estimate.fits);
+            // The solver fills the limit on purpose, so a full bar here is not a warning
+            barFill.RemoveFromClassList("ce-bar-fill--tight");
 
             statCompressed.text = allRows.Count(row => row.status == RowStatus.Compressed).ToString();
             statProtected.text = allRows.Count(row => row.status == RowStatus.Protected).ToString();
@@ -926,8 +930,12 @@ namespace CompressorExclusions {
         private void ShowBar(int cost, int maxCost, string hint) {
             barText.text = $"{cost} / {maxCost} bits";
             barHint.text = hint;
-            barFill.style.width = Length.Percent(maxCost <= 0 ? 0 : Mathf.Clamp01((float)cost / maxCost) * 100);
+            var ratio = maxCost <= 0 ? 0 : (float)cost / maxCost;
+            barFill.style.width = Length.Percent(Mathf.Clamp01(ratio) * 100);
             barFill.RemoveFromClassList("ce-bar-fill--over");
+            // Little room left: one more number parameter or a few bools can push it over
+            barFill.EnableInClassList("ce-bar-fill--tight", ratio > TightRatio && ratio <= 1);
+            barFill.parent.tooltip = maxCost <= 0 ? "" : $"{cost} de {maxCost} bits sincronizados ({Mathf.RoundToInt(ratio * 100)}%)";
         }
 
         private void ClearStats() {

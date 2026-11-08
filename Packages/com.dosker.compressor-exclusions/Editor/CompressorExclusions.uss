@@ -102,6 +102,10 @@
     background-color: rgb(46, 160, 110);
 }
 
+.ce-bar-fill--tight {
+    background-color: rgb(222, 163, 48);
+}
+
 .ce-bar-fill--over {
     background-color: rgb(214, 69, 65);
 }
