@@ -1,9 +1,9 @@
 {
   "name": "com.dosker.vrc-edit-mode-preview",
   "displayName": "Dosker Tools - VRChat Edit-Mode Preview",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "unity": "2022.3",
-  "description": "Visualiza PhysBones, Contacts e Constraints do VRChat fora do Play mode.",
+  "description": "Visualiza PhysBones, Contacts, Constraints e animações do Animator do VRChat fora do Play mode.",
   "author": {
     "name": "Dosker",
     "email": "6579456+sdosker@users.noreply.github.com",

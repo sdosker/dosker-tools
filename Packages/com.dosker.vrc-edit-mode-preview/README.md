@@ -92,6 +92,45 @@ dos ossos que podem ser pegos, que continuam visíveis durante a simulação.
 - **Atualizações do SDK:** a janela avisa quando um campo usado não existe mais.
 - **Preferências:** ficam em `UserSettings/VrcEditModePreview.json`.
 
+## Animator
+
+Ligue **Animator** na barra do topo, ao lado de **Simular PhysBones**; ele liga a simulação junto, e ela
+pode ser desligada depois. O primeiro cartão da janela mostra o que está em preview. Selecione um estado, uma blend
+tree ou um clip na janela Animator, e a animação aparece no avatar da cena que usa aquele controller:
+
+- **Full Controller do VRCFury:** os caminhos das animações são resolvidos como no build: a partir do
+  objeto do Full Controller (ou do *Root Object Override*), subindo até a raiz do avatar, com as regras de
+  *Rewrite Bindings*, *Root Bindings Apply To Avatar* e o ajuste da escala da raiz. Caminhos sem alvo
+  aparecem no cartão **Propriedades**, porque o build também os descarta.
+- **Avatar Descriptor:** camadas personalizadas (Base, Additive, Gesture, Action, FX e as especiais), com
+  caminhos a partir da raiz do avatar.
+- **Blend trees:** os parâmetros acompanham o slider da blend tree na janela Animator (desligue
+  **Seguir Animator** para usar só os da janela), e podem ser arrastados no gráfico 1D ou 2D. O peso de cada
+  clip é calculado pelo próprio Unity, para todos os tipos, inclusive Direct e blend trees aninhadas.
+- **Músculos:** clips humanoides animam o corpo por cima da pose da cena, respeitando a máscara humanoide da
+  layer; o quadril fica no lugar e root motion e IK ficam de fora.
+- **Tempo:** tocar, pausar, arrastar a linha do tempo, velocidade e repetição. **Travar** mantém o preview
+  atual ao selecionar outra coisa. Um `.anim` selecionado no Project usa o controller da cena que o toca.
+
+Tudo passa pelo modo de animação do Unity, o mesmo do preview da janela Animation: os valores originais
+ficam guardados, nada é salvo no arquivo da cena e a cena não fica modificada. Tudo volta ao parar, ao
+salvar a cena (o preview volta logo depois), recompilar, fechar a cena, entrar no Play mode ou iniciar um
+build do VRChat SDK. Se o Unity fechar no meio, a cena no disco continua como estava. Propriedades
+animadas ficam vermelhas no Inspector, e edições nelas não ficam. Enquanto a janela Animation ou a
+Timeline estiverem com o preview delas ligado, este espera.
+
+Com **Simular PhysBones** ligado na janela VRChat Edit-Mode Preview, os dois rodam juntos na ordem do
+VRChat: o animator escreve a pose e os PhysBones simulam por cima dela, inclusive em ossos de cadeia que a
+animação move. Quando o preview anima músculos, a animação de teste dos PhysBones espera. A pose de repouso
+da simulação é sempre lida sem o preview, então ligar e desligar os dois em qualquer ordem não muda nada no
+avatar.
+
+O preview mostra uma camada por vez, sem as outras layers, transições, write defaults, máscaras de
+transform, *mirror* ou *cycle offset*. Desligue-o antes de bakes manuais de outras ferramentas que copiam o
+avatar, como o **Build an Editor Test Copy** do VRCFury.
+
+## Limites
+
 É uma visualização: rede, permissões entre jogadores, parâmetros de animator e
 colisão com as mãos de outros jogadores só existem no Play mode ou no cliente.
 Confirme os valores finais lá.

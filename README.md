@@ -37,7 +37,7 @@ janela do Dosker. A escolha vale para todos os pacotes instalados de uma vez.
 | Pacote | O que faz | Licença |
 |---|---|---|
 | [ShaderView](Packages/com.dosker.shader-view/README.md) | Depura shaders simulando as câmeras e os contextos do VRChat | MIT |
-| [VRChat Edit-Mode Preview](Packages/com.dosker.vrc-edit-mode-preview/README.md) | Visualiza PhysBones, Contacts e Constraints fora do Play mode | MIT |
+| [VRChat Edit-Mode Preview](Packages/com.dosker.vrc-edit-mode-preview/README.md) | Visualiza PhysBones, Contacts, Constraints e animações do Animator fora do Play mode | MIT |
 | [Animation Audio Waveform](Packages/com.dosker.animation-audio-waveform/README.md) | Mostra o áudio dentro da janela Animation | MIT |
 | [Compressor Exclusions](Packages/com.dosker.compressor-exclusions/README.md) | Escolhe quais parâmetros o compressor do VRCFury pode comprimir e prevê o resultado do build | [Não comercial](Packages/com.dosker.compressor-exclusions/LICENSE.md) |
 | [Performance Budget](Packages/com.dosker.performance-budget/README.md) | Prevê o ranking do avatar considerando o que o VRCFury muda no build | MIT |

@@ -3,6 +3,15 @@
 Todas as mudanças relevantes deste pacote ficam neste arquivo. O formato segue o
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.10.0] - 2026-11-09
+
+### Adicionado
+
+- **Animator**, um botão na barra do topo ao lado de **Simular PhysBones** e um cartão próprio: mostra no avatar, no Edit mode, o estado, a blend tree ou o clip selecionado no Animator. O controller pode vir de um Full Controller do VRCFury, com os caminhos resolvidos como no build (subindo a partir do objeto, *Rewrite Bindings*, *Root Bindings Apply To Avatar* e a escala da raiz), ou de uma camada do Avatar Descriptor.
+- Blend trees mostram os parâmetros, que acompanham o slider da janela Animator, um gráfico 1D ou 2D arrastável e o peso de cada clip, calculado pelo próprio Unity.
+- Ligar o **Animator** liga **Simular PhysBones** junto, e os dois rodam na ordem do VRChat: o animator escreve a pose e os PhysBones simulam por cima dela. A pose de repouso da simulação é lida sem o preview, e ligar ou desligar os dois em qualquer ordem não muda o avatar.
+- Tudo passa pelo modo de animação do Unity, como o preview da janela Animation: nada é salvo, a cena não fica modificada e tudo volta ao parar, salvar, recompilar, entrar no Play mode ou iniciar um build do VRChat SDK.
+
 ## [0.9.0] - 2026-11-09
 
 ### Adicionado

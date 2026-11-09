@@ -85,6 +85,8 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
 
     private static readonly Dictionary<(Type, string), FieldInfo> FieldCache = new Dictionary<(Type, string), FieldInfo>();
     private static readonly HashSet<string> MissingFields = new HashSet<string>();
+    // Sobrevive a um reload de scripts com o estado ligado/pausado; o resto é refeito.
+    [SerializeField] private AnimatorPreview animatorPreview = new AnimatorPreview();
     private static readonly Dictionary<string, int> MuscleIndices = new Dictionary<string, int>();
 
     private static Type physBoneType;
@@ -571,11 +573,13 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
             Field<IList>(bone, "bones")?.Clear();
         }
 
-        public void Tick()
+        // beforeSolve roda onde o Animator rodaria no cliente: depois do FixedUpdate e antes do LateUpdate.
+        public void Tick(Action beforeSolve)
         {
             // O solver mede o tempo por Time, que no Edit mode só anda quando o player loop roda.
             EditorApplication.QueuePlayerLoopUpdate();
             fixedUpdate.Invoke(manager, null);
+            beforeSolve?.Invoke();
             lateUpdate.Invoke(manager, null);
         }
 
@@ -685,6 +689,8 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         wantsMouseMove = true;
         LoadPreferences();
         ResolveTypes();
+        animatorPreview = animatorPreview ?? new AnimatorPreview();
+        animatorPreview.Enable(this);
         SceneView.beforeSceneGui += HandleLockMouseDown;
         SceneView.duringSceneGui += DrawSceneGui;
         Undo.postprocessModifications += HandleLockModifications;
@@ -702,6 +708,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
     private void OnDisable()
     {
         SavePreferences();
+        animatorPreview.Disable();
         StopSdkSolver();
         RestoreAllChains();
         ClearMaterialContacts();
@@ -907,6 +914,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
 
         scroll = EditorGUILayout.BeginScrollView(scroll);
         DrawHealth();
+        animatorPreview.DrawCard();
         EditorGUI.BeginChangeCheck();
         DrawPhysBonesCard();
         DrawCollidersCard();
@@ -957,6 +965,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
                 {
                     SetSimulation(!simulatePhysBones);
                 }
+                animatorPreview.DrawToggleButton();
                 using (new EditorGUI.DisabledScope(!simulatePhysBones))
                 {
                     if (DoskerEditorUi.IconButton("Refresh", "↻", Tr("Reiniciar a simulação", "Restart the simulation")))
@@ -1022,6 +1031,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
                     testMotionSpeed = EditorGUILayout.Slider(testMotionSpeed, 0f, 2f, GUILayout.MinWidth(110f));
                 }
             }
+            animatorPreview.DrawTransport();
         }
     }
 
@@ -1586,6 +1596,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         }
 
         FinishLockDrag();
+        animatorPreview.Tick();
 
         var now = EditorApplication.timeSinceStartup;
         if (componentsDirty || now >= nextComponentRefresh)
@@ -2482,6 +2493,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         }
         else
         {
+            animatorPreview.Suspend();
             EndGrab(false);
             StopSdkSolver();
             RestoreAllChains();
@@ -2497,6 +2509,8 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
     // porque precisam dos ossos pais no lugar.
     private void StepSimulation()
     {
+        // Como no VRChat: o animator escreve a pose, e os PhysBones simulam por cima dela.
+        animatorPreview.SampleForPhysBones();
         ApplyTestMotion();
         if (sdkSolver != null)
         {
@@ -3014,7 +3028,11 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         testMotionTime += SimulationStep * testMotionSpeed;
         foreach (var rig in motionRigs)
         {
-            ApplyMotionToRig(rig);
+            // O Animator Preview com músculos manda no corpo; a animação de teste espera.
+            if (!animatorPreview.DrivesHumanoid(rig.Animator))
+            {
+                ApplyMotionToRig(rig);
+            }
         }
     }
 
@@ -3355,6 +3373,9 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
 
     private void RestartSimulation()
     {
+        // A pose de repouso é lida sem o Animator Preview: com ele, a pose animada viraria repouso e seria
+        // escrita na cena ao parar, fora do AnimationMode.
+        animatorPreview.Suspend();
         EndGrab(false);
         StopSdkSolver();
         RestoreAllChains();
@@ -3420,7 +3441,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
                 sdkSolver.ApplyConfiguration(component);
             }
             pendingConfiguration.Clear();
-            sdkSolver.Tick();
+            sdkSolver.Tick(ReapplyAnimatedChains);
         }
         catch (Exception exception)
         {
@@ -3431,6 +3452,18 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         foreach (var chain in chains)
         {
             SyncChain(chain);
+        }
+    }
+
+    private void ReapplyAnimatedChains()
+    {
+        if (!animatorPreview.IsActive)
+        {
+            return;
+        }
+        foreach (var particle in chains.SelectMany(chain => chain.Particles).Where(particle => !particle.Virtual && particle.Transform != null))
+        {
+            animatorPreview.ReapplyAnimated(particle.Transform);
         }
     }
 
@@ -3672,6 +3705,8 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
             {
                 particle.Transform.localPosition = particle.RestLocalPosition;
                 particle.Transform.localRotation = particle.RestLocalRotation;
+                // Um osso animado pelo Animator Preview parte da pose animada, não da de repouso.
+                animatorPreview.ReapplyAnimated(particle.Transform);
             }
         }
         foreach (var particle in chain.Particles)
