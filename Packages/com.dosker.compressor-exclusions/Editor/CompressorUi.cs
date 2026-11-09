@@ -1,10 +1,11 @@
 using System.Linq;
 using UnityEditor;
 using UnityEngine.UIElements;
+using static DoskerTools.EditorUi.DoskerLocale;
 
 namespace CompressorExclusions {
     internal static class CompressorUi {
-        public const string Version = "1.3.0";
+        public const string Version = "1.4.0";
 
         private const string StyleSheetName = "CompressorExclusions";
 
@@ -19,8 +20,8 @@ namespace CompressorExclusions {
 
         public static string ChoiceLabel(ParamChoice choice) {
             switch (choice) {
-                case ParamChoice.Protect: return "Proteger";
-                case ParamChoice.Compress: return "Comprimir";
+                case ParamChoice.Protect: return Tr("Proteger", "Protect");
+                case ParamChoice.Compress: return Tr("Comprimir", "Compress");
                 default: return "Auto";
             }
         }

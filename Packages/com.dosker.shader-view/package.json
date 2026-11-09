@@ -1,7 +1,7 @@
 {
   "name": "com.dosker.shader-view",
   "displayName": "Dosker Tools - ShaderView",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "unity": "2022.3",
   "description": "Depurador de shaders que simula as câmeras e os contextos do VRChat no Editor.",
   "author": {
@@ -11,7 +11,7 @@
   },
   "license": "MIT",
   "vpmDependencies": {
-    "com.dosker.editor-ui": ">=0.7.0",
+    "com.dosker.editor-ui": ">=0.8.0",
     "com.vrchat.base": ">=3.7.0"
   },
   "legacyFiles": {

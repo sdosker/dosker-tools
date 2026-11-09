@@ -8,6 +8,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Audio;
+using static DoskerTools.EditorUi.DoskerLocale;
 
 // Janela usada apenas quando o painel não pode ser embutido na janela Animation (sem Harmony).
 public sealed class AnimationAudioWaveformWindow : EditorWindow
@@ -18,7 +19,9 @@ public sealed class AnimationAudioWaveformWindow : EditorWindow
     private Rect lastShownArea;
     private AnimationClip lastClip;
 
-    [MenuItem("Tools/Dosker Tools/Animation Audio Waveform")]
+    private const string MenuPath = "Tools/Dosker Tools/Animation Audio Waveform";
+
+    [MenuItem(MenuPath)]
     public static void OpenWindow()
     {
         if (AnimationAudioHarmonyPatch.Active)
@@ -27,12 +30,32 @@ public sealed class AnimationAudioWaveformWindow : EditorWindow
             settings.panelEnabled = !settings.panelEnabled;
             settings.Save();
             AnimationWindowBridge.RepaintAll();
+            // O menu liga e desliga o painel embutido: sem aviso, um clique parece não fazer nada.
+            var animationWindow = AnimationWindowBridge.FindTargetWindow();
+            if (animationWindow != null)
+            {
+                animationWindow.ShowNotification(new GUIContent(settings.panelEnabled
+                    ? Tr("Painel de áudio ligado", "Audio panel on")
+                    : Tr("Painel de áudio desligado", "Audio panel off")), 1.5f);
+            }
+            else if (settings.panelEnabled)
+            {
+                EditorApplication.ExecuteMenuItem("Window/Animation/Animation");
+            }
             return;
         }
 
         var window = GetWindow<AnimationAudioWaveformWindow>("Audio Waveform");
         window.minSize = new Vector2(420f, 120f);
         window.Show();
+    }
+
+    // A marca no menu mostra se o painel embutido está ligado.
+    [MenuItem(MenuPath, true)]
+    private static bool OpenWindowCheck()
+    {
+        Menu.SetChecked(MenuPath, AnimationAudioHarmonyPatch.Active && AnimationAudioSettings.Instance.panelEnabled);
+        return true;
     }
 
     private void OnEnable()
@@ -70,13 +93,13 @@ public sealed class AnimationAudioWaveformWindow : EditorWindow
         var unavailable = AnimationAudioHarmonyPatch.UnavailableReason;
         if (unavailable != null)
         {
-            EditorGUILayout.HelpBox("Janela separada: " + unavailable, MessageType.None);
+            EditorGUILayout.HelpBox(Tr("Janela separada: ", "Separate window: ") + unavailable, MessageType.None);
         }
 
         var animationWindow = AnimationWindowBridge.FindTargetWindow();
         if (animationWindow == null)
         {
-            EditorGUILayout.HelpBox("Abra a janela Animation (Window > Animation > Animation) e selecione um clip.", MessageType.Info);
+            EditorGUILayout.HelpBox(Tr("Abra a janela Animation (Window > Animation > Animation) e selecione um clip.", "Open the Animation window (Window > Animation > Animation) and select a clip."), MessageType.Info);
             return;
         }
 
@@ -363,7 +386,7 @@ internal sealed class AnimationAudioSettings
         }
         catch (Exception exception)
         {
-            Debug.LogWarning("Animation Audio Waveform: configurações ignoradas. " + exception.Message);
+            Debug.LogWarning(Tr("Animation Audio Waveform: configurações ignoradas. ", "Animation Audio Waveform: settings ignored. ") + exception.Message);
         }
         return new AnimationAudioSettings();
     }
@@ -376,7 +399,7 @@ internal sealed class AnimationAudioSettings
         }
         catch (Exception exception)
         {
-            Debug.LogWarning("Animation Audio Waveform: não foi possível salvar as configurações. " + exception.Message);
+            Debug.LogWarning(Tr("Animation Audio Waveform: não foi possível salvar as configurações. ", "Animation Audio Waveform: could not save the settings. ") + exception.Message);
         }
     }
 
@@ -586,7 +609,7 @@ internal sealed class AnimationAudioModel
         return "instance:" + clip.GetInstanceID();
     }
 
-    // Mesma regra do Unity ao converter a curva para bool; confirmada por AnimationAudioValidation.
+    // Mesma regra do Unity ao converter a curva para bool; confirmada pela validação em tests/Unity.
     public static bool IsActiveValue(float value)
     {
         return Mathf.Abs(value) > ActiveEpsilon;
@@ -1522,6 +1545,7 @@ internal static class AnimationAudioPlayback
 internal static class AnimationAudioPanel
 {
     public const float ScrollbarWidth = 13f;
+    private const float LanguageButtonWidth = 36f;
     public const float HeaderHeight = 22f;
     public const float SplitterHeight = 4f;
     public const float MinimumHeight = 70f;
@@ -1587,7 +1611,7 @@ internal static class AnimationAudioPanel
         var model = AnimationAudioModel.For(window);
         if (model == null)
         {
-            GUI.Label(rect, "Selecione um clip na janela Animation.", EditorStyles.centeredGreyMiniLabel);
+            GUI.Label(rect, Tr("Selecione um clip na janela Animation.", "Select a clip in the Animation window."), EditorStyles.centeredGreyMiniLabel);
             return;
         }
 
@@ -1643,7 +1667,7 @@ internal static class AnimationAudioPanel
 
         var row = new Rect(rect.x + 4f, rect.y + 2f, 90f, 18f);
         EditorGUI.BeginChangeCheck();
-        var expanded = EditorGUI.Foldout(new Rect(row.x + 10f, row.y, row.width - 10f, row.height), !settings.collapsed, "Áudio", true);
+        var expanded = EditorGUI.Foldout(new Rect(row.x + 10f, row.y, row.width - 10f, row.height), !settings.collapsed, Tr("Áudio", "Audio"), true);
         if (EditorGUI.EndChangeCheck())
         {
             settings.collapsed = !expanded;
@@ -1655,7 +1679,7 @@ internal static class AnimationAudioPanel
         row.x = row.xMax;
         row.width = 150f;
         EditorGUI.BeginChangeCheck();
-        var playback = EditorGUI.ToggleLeft(row, "Tocar com a animação", settings.playbackEnabled);
+        var playback = EditorGUI.ToggleLeft(row, Tr("Tocar com a animação", "Play with animation"), settings.playbackEnabled);
         if (EditorGUI.EndChangeCheck())
         {
             settings.playbackEnabled = playback;
@@ -1665,7 +1689,7 @@ internal static class AnimationAudioPanel
         row.x = row.xMax;
         row.width = 120f;
         EditorGUI.BeginChangeCheck();
-        var falloff = EditorGUI.ToggleLeft(row, "Áudio 3D (câmera)", settings.falloffEnabled);
+        var falloff = EditorGUI.ToggleLeft(row, Tr("Áudio 3D (câmera)", "3D audio (camera)"), settings.falloffEnabled);
         if (EditorGUI.EndChangeCheck())
         {
             settings.falloffEnabled = falloff;
@@ -1675,7 +1699,7 @@ internal static class AnimationAudioPanel
         row.x = row.xMax;
         row.width = 112f;
         EditorGUI.BeginChangeCheck();
-        var scrubAudio = EditorGUI.ToggleLeft(row, new GUIContent("Som ao arrastar", "Toca um trecho curto ao arrastar a playhead neste painel."), settings.scrubAudio);
+        var scrubAudio = EditorGUI.ToggleLeft(row, new GUIContent(Tr("Som ao arrastar", "Scrub sound"), Tr("Toca um trecho curto ao arrastar a playhead neste painel.", "Plays a short snippet while dragging the playhead in this panel.")), settings.scrubAudio);
         if (EditorGUI.EndChangeCheck())
         {
             settings.scrubAudio = scrubAudio;
@@ -1685,7 +1709,7 @@ internal static class AnimationAudioPanel
         row.x = row.xMax;
         row.width = 76f;
         EditorGUI.BeginChangeCheck();
-        var latencyContent = new GUIContent("ms", "Compensa o atraso do fone ou da saída de áudio, adiantando o som.");
+        var latencyContent = new GUIContent("ms", Tr("Compensa o atraso do fone ou da saída de áudio, adiantando o som.", "Compensates for headphone or audio output latency by playing the sound earlier."));
         var latency = EditorGUI.FloatField(new Rect(row.x, row.y, 46f, row.height), settings.latencyMilliseconds, EditorStyles.miniTextField);
         GUI.Label(new Rect(row.x + 48f, row.y, 26f, row.height), latencyContent, EditorStyles.miniLabel);
         if (EditorGUI.EndChangeCheck())
@@ -1696,9 +1720,14 @@ internal static class AnimationAudioPanel
 
         row.x = row.xMax + 8f;
         row.width = 100f;
-        GUI.Label(row, "Adicionar áudio");
+        GUI.Label(row, Tr("Adicionar áudio", "Add audio"));
         row.x = row.xMax + 4f;
-        row.width = Mathf.Clamp(rect.xMax - row.x - 6f, 60f, 240f);
+        row.width = Mathf.Clamp(rect.xMax - row.x - LanguageButtonWidth - 10f, 60f, 240f);
+        var languageRect = new Rect(rect.xMax - LanguageButtonWidth - 4f, row.y, LanguageButtonWidth, row.height);
+        if (GUI.Button(languageRect, new GUIContent(ShortCode, "Language / Idioma"), EditorStyles.miniPullDown))
+        {
+            ShowMenu(languageRect);
+        }
         var added = EditorGUI.ObjectField(row, GUIContent.none, null, typeof(AudioClip), false) as AudioClip;
         if (added != null)
         {
@@ -1737,8 +1766,8 @@ internal static class AnimationAudioPanel
         if (tracks.Count == 0)
         {
             var message = model.Root == null
-                ? "Sem objeto raiz selecionado. Adicione um áudio acima."
-                : "Nenhum áudio com toggle neste clip. Adicione um áudio acima.";
+                ? Tr("Sem objeto raiz selecionado. Adicione um áudio acima.", "No root object selected. Add an audio clip above.")
+                : Tr("Nenhum áudio com toggle neste clip. Adicione um áudio acima.", "No toggled audio in this clip. Add an audio clip above.");
             GUI.Label(new Rect(0f, 4f, rect.width, 20f), message, EditorStyles.centeredGreyMiniLabel);
         }
 
@@ -1801,7 +1830,7 @@ internal static class AnimationAudioPanel
 
         var soloRect = new Rect(rect.xMax - (track.IsManual ? 38f : 20f), rect.y + 3f, 16f, 16f);
         var isSolo = AnimationAudioPlayback.SoloKey == track.Key;
-        if (GUI.Toggle(soloRect, isSolo, new GUIContent("S", "Solo: ouvir só esta faixa"), EditorStyles.miniButton) != isSolo)
+        if (GUI.Toggle(soloRect, isSolo, new GUIContent("S", Tr("Solo: ouvir só esta faixa", "Solo: hear only this track")), EditorStyles.miniButton) != isSolo)
         {
             AnimationAudioPlayback.SoloKey = isSolo ? null : track.Key;
         }
@@ -1809,7 +1838,7 @@ internal static class AnimationAudioPanel
         if (track.IsManual)
         {
             EditorGUI.BeginChangeCheck();
-            var locked = GUI.Toggle(new Rect(rect.xMax - 56f, rect.y + 3f, 16f, 16f), track.Manual.locked, new GUIContent("L", "Travar: impede arrastar esta faixa"), EditorStyles.miniButton);
+            var locked = GUI.Toggle(new Rect(rect.xMax - 56f, rect.y + 3f, 16f, 16f), track.Manual.locked, new GUIContent("L", Tr("Travar: impede arrastar esta faixa", "Lock: prevents dragging this track")), EditorStyles.miniButton);
             if (EditorGUI.EndChangeCheck())
             {
                 track.Manual.locked = locked;
@@ -1819,7 +1848,7 @@ internal static class AnimationAudioPanel
 
         var row = new Rect(rect.x + 4f, rect.y + 21f, 46f, 16f);
         EditorGUI.BeginChangeCheck();
-        var visible = EditorGUI.ToggleLeft(row, "Ver", track.Visible, EditorStyles.miniLabel);
+        var visible = EditorGUI.ToggleLeft(row, Tr("Ver", "Show"), track.Visible, EditorStyles.miniLabel);
         if (EditorGUI.EndChangeCheck())
         {
             model.SetVisible(track, visible);
@@ -1828,7 +1857,7 @@ internal static class AnimationAudioPanel
         row.x = row.xMax;
         row.width = 52f;
         EditorGUI.BeginChangeCheck();
-        var play = EditorGUI.ToggleLeft(row, "Tocar", track.Play, EditorStyles.miniLabel);
+        var play = EditorGUI.ToggleLeft(row, Tr("Tocar", "Play"), track.Play, EditorStyles.miniLabel);
         if (EditorGUI.EndChangeCheck())
         {
             model.SetPlay(track, play);
@@ -2112,9 +2141,9 @@ internal static class AnimationAudioHarmonyPatch
         {
             if (panelFailed)
             {
-                return "o painel embutido teve um erro e volta na próxima recompilação. Veja o Console.";
+                return Tr("o painel embutido teve um erro e volta na próxima recompilação. Veja o Console.", "the embedded panel hit an error and comes back on the next recompile. See the Console.");
             }
-            return Active ? null : "Harmony não encontrado ou o Unity mudou a janela Animation.";
+            return Active ? null : Tr("Harmony não encontrado ou o Unity mudou a janela Animation.", "Harmony not found, or Unity changed the Animation window.");
         }
     }
 
@@ -2205,7 +2234,7 @@ internal static class AnimationAudioHarmonyPatch
         catch (Exception exception)
         {
             Active = false;
-            Debug.LogWarning("Animation Audio Waveform: patch indisponível, use a janela separada. " + exception);
+            Debug.LogWarning(Tr("Animation Audio Waveform: patch indisponível, use a janela separada. ", "Animation Audio Waveform: patch unavailable, use the separate window. ") + exception);
         }
     }
 
@@ -2223,7 +2252,7 @@ internal static class AnimationAudioHarmonyPatch
         }
         catch (Exception exception)
         {
-            Debug.LogWarning("Animation Audio Waveform: falha ao remover o patch. " + exception.Message);
+            Debug.LogWarning(Tr("Animation Audio Waveform: falha ao remover o patch. ", "Animation Audio Waveform: failed to remove the patch. ") + exception.Message);
         }
         harmony = null;
         Active = false;
@@ -2305,348 +2334,6 @@ internal static class AnimationAudioHarmonyPatch
     private static void DisablePanel(Exception exception)
     {
         panelFailed = true;
-        Debug.LogError("Animation Audio Waveform: painel desativado até a próxima recompilação. " + exception);
-    }
-}
-
-// ---------------------------------------------------------------- Validação
-
-public static class AnimationAudioValidation
-{
-    private const double AudioCheckDelay = 0.4;
-
-    private static readonly List<string> Failures = new List<string>();
-
-    private static GameObject root;
-    private static AudioClip tone;
-    private static AudioSource[] voices;
-    private static double audioCheckAt;
-
-    [MenuItem("Tools/Dosker Tools/Validar Animation Audio")]
-    public static void RunAutomatedValidation()
-    {
-        Failures.Clear();
-        foreach (var member in AnimationWindowBridge.MissingMembers())
-        {
-            Failures.Add("API interna ausente: " + member);
-        }
-
-        Debug.Log("ANIMATION_AUDIO_HARMONY_ACTIVE=" + AnimationAudioHarmonyPatch.Active);
-
-        tone = CreateTone();
-        ValidatePeaks();
-        ValidateActivation();
-        ValidateContinuityRules();
-        ValidateFalloff();
-
-        if (Application.isBatchMode)
-        {
-            Finish();
-            return;
-        }
-
-        // Duas fontes ao mesmo tempo, fora do Play mode, são a base da reprodução.
-        voices = new[] { CreateVoice(), CreateVoice() };
-        foreach (var voice in voices)
-        {
-            voice.Play();
-        }
-        audioCheckAt = EditorApplication.timeSinceStartup + AudioCheckDelay;
-        EditorApplication.update += CheckAudio;
-    }
-
-    private static AudioClip CreateTone()
-    {
-        const int frequency = 44100;
-        var clip = AudioClip.Create("AnimationAudioValidationTone", frequency, 1, frequency, false);
-        var samples = new float[frequency];
-        for (var index = 0; index < samples.Length; index++)
-        {
-            samples[index] = 0.5f * Mathf.Sin(index * 0.05f);
-        }
-        clip.SetData(samples, 0);
-        clip.hideFlags = HideFlags.HideAndDontSave;
-        return clip;
-    }
-
-    private static AudioSource CreateVoice()
-    {
-        var gameObject = EditorUtility.CreateGameObjectWithHideFlags("AnimationAudioValidationVoice", HideFlags.HideAndDontSave, typeof(AudioSource));
-        var voice = gameObject.GetComponent<AudioSource>();
-        voice.playOnAwake = false;
-        voice.spatialBlend = 0f;
-        voice.volume = 0f;
-        voice.loop = true;
-        voice.clip = tone;
-        return voice;
-    }
-
-    private static void ValidatePeaks()
-    {
-        var peaks = AnimationAudioPeaks.Get(tone);
-        if (peaks == null || !peaks.HasData)
-        {
-            Failures.Add("Waveform sem dados para o clip de teste.");
-        }
-    }
-
-    private static void ValidateContinuityRules()
-    {
-        var track = new AnimationAudioTrack { Clip = tone };
-        track.Segments.Add(new AnimationAudioSegment { Start = 2f, End = 3f });
-        if (track.TryGetPosition(1.99f, out _))
-        {
-            Failures.Add("Áudio tocaria antes da ativação.");
-        }
-        if (!track.TryGetPosition(2.25f, out var position) || !Mathf.Approximately(position, 0.25f))
-        {
-            Failures.Add("Posição do áudio não parte do ponto de ativação.");
-        }
-    }
-
-    private static void ValidateFalloff()
-    {
-        const float minDistance = 2f;
-        const float maxDistance = 8f;
-
-        var gameObject = EditorUtility.CreateGameObjectWithHideFlags("AnimationAudioValidationFalloff", HideFlags.HideAndDontSave, typeof(AudioSource));
-        try
-        {
-            var source = gameObject.GetComponent<AudioSource>();
-            source.minDistance = minDistance;
-            source.maxDistance = maxDistance;
-            source.spatialBlend = 1f;
-
-            var scale = AnimationAudioFalloff.RolloffScale;
-            source.rolloffMode = AudioRolloffMode.Logarithmic;
-            ExpectGain(source, 1f, 1f, "logarítmico antes do mínimo");
-            ExpectGain(source, 4f, minDistance / (2f * scale + minDistance), "logarítmico entre mínimo e máximo");
-            ExpectGain(source, 16f, minDistance / (14f * scale + minDistance), "logarítmico além do máximo");
-
-            source.rolloffMode = AudioRolloffMode.Linear;
-            ExpectGain(source, 1f, 1f, "linear antes do mínimo");
-            ExpectGain(source, 5f, 0.5f, "linear entre mínimo e máximo");
-            ExpectGain(source, 16f, 0f, "linear além do máximo");
-
-            source.rolloffMode = AudioRolloffMode.Custom;
-            source.SetCustomCurve(AudioSourceCurveType.CustomRolloff, AnimationCurve.Linear(0f, 1f, 1f, 0f));
-            ExpectGain(source, 2f, 0.75f, "customizado antes do mínimo");
-            ExpectGain(source, 4f, 0.5f, "customizado entre mínimo e máximo");
-            ExpectGain(source, 16f, 0f, "customizado além do máximo");
-
-            source.rolloffMode = AudioRolloffMode.Linear;
-            source.spatialBlend = 0f;
-            ExpectGain(source, 16f, 1f, "fonte 2D");
-            source.spatialBlend = 0.5f;
-            ExpectGain(source, 16f, 0.5f, "fonte com spatial blend parcial");
-
-            ValidateSpatialMix(source);
-        }
-        finally
-        {
-            UnityEngine.Object.DestroyImmediate(gameObject);
-        }
-    }
-
-    // Os valores esperados de cada canal foram medidos na saída real de AudioSources 3D.
-    private static void ValidateSpatialMix(AudioSource source)
-    {
-        source.minDistance = 100f;
-        source.maxDistance = 500f;
-        source.spatialBlend = 1f;
-        ExpectChannels(source, new Vector3(0f, 0f, 1f), 0.7071f, 0.7071f, "som à frente");
-        ExpectChannels(source, new Vector3(0f, 0f, -1f), 0.7071f, 0.7071f, "som atrás");
-        ExpectChannels(source, new Vector3(0f, 1f, 0f), 0.7071f, 0.7071f, "som acima");
-        ExpectChannels(source, new Vector3(1f, 0f, 0f), 0f, 1f, "som à direita");
-        ExpectChannels(source, new Vector3(-1f, 0f, 0f), 1f, 0f, "som à esquerda");
-        ExpectChannels(source, new Vector3(0.7071f, 0f, 0.7071f), 0.2588f, 0.9659f, "som a 45 graus");
-        ExpectChannels(source, new Vector3(0.5f, 0f, 0.866f), 0.4114f, 0.9115f, "som a 30 graus");
-        ExpectChannels(source, new Vector3(1f, 1f, 1f).normalized, 0.3569f, 0.9342f, "som na diagonal");
-        ExpectChannels(source, Vector3.zero, 0.7071f, 0.7071f, "som na posição da câmera");
-
-        source.spatialBlend = 0.5f;
-        ExpectChannels(source, new Vector3(1f, 0f, 0f), 0.3536f, 0.8536f, "spatial blend parcial à direita");
-        source.panStereo = 0.5f;
-        ExpectChannels(source, new Vector3(0f, 0f, 1f), 0.6034f, 0.7864f, "spatial blend parcial com pan");
-        source.panStereo = 0f;
-
-        source.spatialBlend = 0f;
-        var flat = AnimationAudioFalloff.GetMix(source, Vector3.left, Vector3.right, 2);
-        if (!Mathf.Approximately(flat.Volume, 1f) || !Mathf.Approximately(flat.Pan, 0f))
-        {
-            Failures.Add("Clip estéreo em fonte 2D mudou de volume ou pan.");
-        }
-
-        source.spatialBlend = 1f;
-        var side = AnimationAudioFalloff.GetMix(source, Vector3.left, Vector3.right, 2);
-        if (!Mathf.Approximately(side.Volume, 1f) || !Mathf.Approximately(side.Pan, 1f))
-        {
-            Failures.Add("Clip estéreo à direita não foi para o canal direito.");
-        }
-    }
-
-    private static void ExpectChannels(AudioSource source, Vector3 direction, float expectedLeft, float expectedRight, string label)
-    {
-        var mix = AnimationAudioFalloff.GetMix(source, source.transform.position - direction, Vector3.right, 1);
-        var left = mix.Volume * Mathf.Sqrt((1f - mix.Pan) * 0.5f);
-        var right = mix.Volume * Mathf.Sqrt((1f + mix.Pan) * 0.5f);
-        if (Mathf.Abs(left - expectedLeft) > 0.002f || Mathf.Abs(right - expectedRight) > 0.002f)
-        {
-            Failures.Add("Pan incorreto (" + label + "): " + left + " / " + right + " em vez de " + expectedLeft + " / " + expectedRight);
-        }
-    }
-
-    private static void ExpectGain(AudioSource source, float distance, float expected, string label)
-    {
-        var gain = AnimationAudioFalloff.GetGain(source, source.transform.position + Vector3.forward * distance);
-        if (Mathf.Abs(gain - expected) > 0.001f)
-        {
-            Failures.Add("Falloff incorreto (" + label + "): " + gain + " em vez de " + expected);
-        }
-    }
-
-    private static void ValidateActivation()
-    {
-        if (AnimationMode.InAnimationMode())
-        {
-            Debug.Log("ANIMATION_AUDIO_ACTIVATION_SKIPPED: feche o preview da janela Animation para validar o ponto de ativação.");
-            return;
-        }
-
-        const float activation = 0.5137f;
-        const float deactivation = 0.9f;
-
-        root = EditorUtility.CreateGameObjectWithHideFlags("AnimationAudioValidationRoot", HideFlags.HideAndDontSave, typeof(Animator));
-        var parent = EditorUtility.CreateGameObjectWithHideFlags("Parent", HideFlags.HideAndDontSave);
-        var child = EditorUtility.CreateGameObjectWithHideFlags("Child", HideFlags.HideAndDontSave, typeof(AudioSource));
-        var threshold = EditorUtility.CreateGameObjectWithHideFlags("Threshold", HideFlags.HideAndDontSave);
-        parent.transform.SetParent(root.transform);
-        child.transform.SetParent(parent.transform);
-        threshold.transform.SetParent(root.transform);
-        var source = child.GetComponent<AudioSource>();
-        source.clip = tone;
-        source.playOnAwake = true;
-
-        var clip = new AnimationClip { frameRate = 60f, hideFlags = HideFlags.HideAndDontSave };
-        var curve = new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(activation, 1f), new Keyframe(deactivation, 0f));
-        var thresholdCurve = new AnimationCurve(
-            new Keyframe(0f, 0.001f),
-            new Keyframe(1f, 0f),
-            new Keyframe(2f, -0.5f),
-            new Keyframe(3f, 0f),
-            new Keyframe(4f, 0.25f),
-            new Keyframe(5f, 0f),
-            new Keyframe(6f, 0.002f),
-            new Keyframe(7f, 0f),
-            new Keyframe(8f, 1f));
-        MakeStepped(curve);
-        MakeStepped(thresholdCurve);
-        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Parent", typeof(GameObject), "m_IsActive"), curve);
-        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Threshold", typeof(GameObject), "m_IsActive"), thresholdCurve);
-
-        var model = AnimationAudioModel.Create(clip, root);
-        if (model.Tracks.Count != 1 || model.Tracks[0].Segments.Count != 1)
-        {
-            Failures.Add("Faixa de toggle no pai não detectada.");
-        }
-        else
-        {
-            var segment = model.Tracks[0].Segments[0];
-            if (!Mathf.Approximately(segment.Start, activation) || !Mathf.Approximately(segment.End, deactivation))
-            {
-                Failures.Add("Trecho calculado incorreto: " + segment.Start + " a " + segment.End);
-            }
-        }
-
-        AnimationMode.StartAnimationMode();
-        try
-        {
-            if (Sample(clip, activation - 0.0005f, child))
-            {
-                Failures.Add("Objeto já ativo antes do ponto calculado.");
-            }
-            if (!Sample(clip, activation, child))
-            {
-                Failures.Add("Objeto inativo no ponto calculado.");
-            }
-            if (Sample(clip, deactivation, child))
-            {
-                Failures.Add("Objeto ativo no ponto de desligamento.");
-            }
-
-            foreach (var key in thresholdCurve.keys)
-            {
-                var actual = Sample(clip, key.time, threshold);
-                Debug.Log("ANIMATION_AUDIO_THRESHOLD value=" + key.value + " active=" + actual);
-                if (actual != AnimationAudioModel.IsActiveValue(key.value))
-                {
-                    Failures.Add("Limiar de ativação diferente do Unity no valor " + key.value);
-                }
-            }
-        }
-        finally
-        {
-            AnimationMode.StopAnimationMode();
-            UnityEngine.Object.DestroyImmediate(clip);
-            UnityEngine.Object.DestroyImmediate(root);
-            root = null;
-        }
-    }
-
-    private static void MakeStepped(AnimationCurve curve)
-    {
-        for (var index = 0; index < curve.length; index++)
-        {
-            AnimationUtility.SetKeyLeftTangentMode(curve, index, AnimationUtility.TangentMode.Constant);
-            AnimationUtility.SetKeyRightTangentMode(curve, index, AnimationUtility.TangentMode.Constant);
-        }
-    }
-
-    private static bool Sample(AnimationClip clip, float time, GameObject target)
-    {
-        AnimationMode.BeginSampling();
-        AnimationMode.SampleAnimationClip(root, clip, time);
-        AnimationMode.EndSampling();
-        return target.activeInHierarchy;
-    }
-
-    private static void CheckAudio()
-    {
-        if (EditorApplication.timeSinceStartup < audioCheckAt)
-        {
-            return;
-        }
-
-        EditorApplication.update -= CheckAudio;
-        foreach (var voice in voices)
-        {
-            if (!voice.isPlaying || voice.timeSamples <= 0)
-            {
-                Failures.Add("AudioSource oculto não reproduziu fora do Play mode.");
-            }
-            UnityEngine.Object.DestroyImmediate(voice.gameObject);
-        }
-        voices = null;
-        Finish();
-    }
-
-    private static void Finish()
-    {
-        UnityEngine.Object.DestroyImmediate(tone);
-        tone = null;
-
-        if (Failures.Count == 0)
-        {
-            Debug.Log("ANIMATION_AUDIO_VALIDATION_OK");
-        }
-        else
-        {
-            Debug.LogError("ANIMATION_AUDIO_VALIDATION_FAILED\n" + string.Join("\n", Failures));
-        }
-
-        if (Application.isBatchMode)
-        {
-            EditorApplication.Exit(Failures.Count == 0 ? 0 : 1);
-        }
+        Debug.LogError(Tr("Animation Audio Waveform: painel desativado até a próxima recompilação. ", "Animation Audio Waveform: panel disabled until the next recompile. ") + exception);
     }
 }

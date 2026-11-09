@@ -10,7 +10,7 @@
 [Leia em português](README.md)
 
 Editor tools for VRChat creators, distributed as VPM packages for the
-[VRChat Creator Companion](https://vcc.docs.vrchat.com/) (VCC). The interface is in Brazilian Portuguese. Performance Budget also has an English interface.
+[VRChat Creator Companion](https://vcc.docs.vrchat.com/) (VCC). Every window is available in English and Brazilian Portuguese.
 
 ## Install
 
@@ -24,6 +24,12 @@ Editor tools for VRChat creators, distributed as VPM packages for the
 3. In VCC, open **Manage Project** and add the packages you want.
 
 The windows are in the **Tools > Dosker Tools** menu.
+
+## Language
+
+By default the tools follow your system language, so they open in English unless your system is in Portuguese.
+To change it, use **Tools > Dosker Tools > Language**, **Edit > Preferences > Dosker Tools**, or the globe button in any
+Dosker window. The choice applies to every installed Dosker package at once.
 
 ## Packages
 

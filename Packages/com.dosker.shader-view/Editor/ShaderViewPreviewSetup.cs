@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using static DoskerTools.EditorUi.DoskerLocale;
 
 public static class ShaderViewPreviewSetup
 {
@@ -17,7 +18,7 @@ public static class ShaderViewPreviewSetup
         {
             EditorUtility.DisplayDialog(
                 "ShaderView",
-                "Stop Play mode before creating the preview scene.",
+                Tr("Saia do Play Mode antes de criar a cena de prévia.", "Stop Play mode before creating the preview scene."),
                 "OK");
             return;
         }
@@ -27,7 +28,7 @@ public static class ShaderViewPreviewSetup
         {
             EditorUtility.DisplayDialog(
                 "ShaderView",
-                "Unity has not imported the shader yet. Wait for asset import to finish, then try again.",
+                Tr("O Unity ainda não importou o shader. Espere a importação terminar e tente de novo.", "Unity has not imported the shader yet. Wait for asset import to finish, then try again."),
                 "OK");
             return;
         }
@@ -36,7 +37,7 @@ public static class ShaderViewPreviewSetup
         {
             EditorUtility.DisplayDialog(
                 "ShaderView",
-                "Unity reported shader compile errors or this graphics device does not support the shader. Check the Console before continuing.",
+                Tr("O Unity acusou erros de compilação no shader ou esta placa de vídeo não o suporta. Confira o Console antes de continuar.", "Unity reported shader compile errors or this graphics device does not support the shader. Check the Console before continuing."),
                 "OK");
             return;
         }
@@ -74,7 +75,7 @@ public static class ShaderViewPreviewSetup
 
         if (!EditorSceneManager.SaveScene(scene, SceneAsset))
         {
-            EditorUtility.DisplayDialog("ShaderView", "Unity could not save the preview scene.", "OK");
+            EditorUtility.DisplayDialog("ShaderView", Tr("O Unity não conseguiu salvar a cena de prévia.", "Unity could not save the preview scene."), "OK");
             return;
         }
 

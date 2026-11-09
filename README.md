@@ -26,6 +26,12 @@ Ferramentas de Editor para criadores de VRChat, distribuídas como pacotes VPM p
 
 As janelas ficam no menu **Tools > Dosker Tools**.
 
+## Idioma
+
+Todas as janelas estão em português e em inglês. Por padrão, seguem o idioma do sistema. Para trocar, use
+**Tools > Dosker Tools > Language**, **Edit > Preferences > Dosker Tools** ou o botão com o globo em qualquer
+janela do Dosker. A escolha vale para todos os pacotes instalados de uma vez.
+
 ## Pacotes
 
 | Pacote | O que faz | Licença |
@@ -69,6 +75,9 @@ python scripts/sync_to_project.py pull <projeto>     # traz os .meta gerados
 dotnet run --project tests/CompressorEstimator.Tests
 python -m unittest discover -s tests -p "test_*.py"
 ```
+
+A validação que só roda dentro do Unity fica em [tests/Unity](tests/Unity/README.md), fora dos pacotes
+publicados. Ela entra no projeto de teste com `--tests` no `push` e no `compile_check.py`.
 
 O workflow **VRCFury compatibility** abre uma issue quando uma versão nova muda os arquivos usados pelo
 Compressor Exclusions. Depois de revisar, registre com `python scripts/check_vrcfury.py --update` e

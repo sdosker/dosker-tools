@@ -17,12 +17,13 @@ namespace DoskerTools.PerformanceBudget
         private const string DocsUrl = "https://github.com/sdosker/dosker-tools/tree/main/Packages/com.dosker.performance-budget#readme";
         private const int HeaviestCount = 5;
 
-        private static readonly DoskerEditorUi.TableColumn[] Columns =
+        // Montadas a cada uso porque os títulos seguem o idioma escolhido.
+        private static DoskerEditorUi.TableColumn[] Columns => new[]
         {
-            new DoskerEditorUi.TableColumn("Categoria", 3f, false),
-            new DoskerEditorUi.TableColumn("Cena", 1f, false),
-            new DoskerEditorUi.TableColumn("Previsão", 1f, false),
-            new DoskerEditorUi.TableColumn("Real", 1f, false),
+            new DoskerEditorUi.TableColumn(DoskerLocale.Tr("Categoria", "Category"), 3f, false),
+            new DoskerEditorUi.TableColumn(DoskerLocale.Tr("Cena", "Scene"), 1f, false),
+            new DoskerEditorUi.TableColumn(DoskerLocale.Tr("Previsão", "Prediction"), 1f, false),
+            new DoskerEditorUi.TableColumn(DoskerLocale.Tr("Real", "Actual"), 1f, false),
         };
 
         private VRCAvatarDescriptor avatar;
@@ -58,6 +59,26 @@ namespace DoskerTools.PerformanceBudget
             wantsMouseMove = true;
             platformTab = BudgetStore.IsMobileBuild ? 1 : 0;
             BudgetStore.Updated += HandleBuildFinished;
+            // As medidas sobrevivem ao reload de scripts, mas AvatarPerformanceStats não é serializável e volta nulo.
+            if (scene != null && sceneStats == null)
+            {
+                EditorApplication.delayCall += () =>
+                {
+                    if (this == null)
+                    {
+                        return;
+                    }
+                    if (avatar != null)
+                    {
+                        Measure();
+                    }
+                    else
+                    {
+                        scene = null;
+                    }
+                    Repaint();
+                };
+            }
         }
 
         private void OnDisable()
@@ -130,7 +151,7 @@ namespace DoskerTools.PerformanceBudget
                     DoskerLocale.Tr("Nenhum avatar na cena", "No avatar in the scene"),
                     DoskerLocale.Tr("Abra uma cena com um VRC Avatar Descriptor.", "Open a scene with a VRC Avatar Descriptor."));
             }
-            else if (scene == null)
+            else if (scene == null || sceneStats == null || predictedStats == null)
             {
                 DoskerEditorUi.EmptyState(
                     DoskerLocale.Tr("Ainda sem medição", "Not measured yet"),
@@ -192,11 +213,11 @@ namespace DoskerTools.PerformanceBudget
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                DrawOverallPill("Cena", sceneStats);
-                DrawOverallPill("Previsão", predictedStats);
+                DrawOverallPill(DoskerLocale.Tr("Cena", "Scene"), sceneStats);
+                DrawOverallPill(DoskerLocale.Tr("Previsão", "Prediction"), predictedStats);
                 if (realStats != null)
                 {
-                    DrawOverallPill("Real", realStats);
+                    DrawOverallPill(DoskerLocale.Tr("Real", "Actual"), realStats);
                 }
             }
         }
@@ -227,7 +248,8 @@ namespace DoskerTools.PerformanceBudget
         private void DrawTable()
         {
             onlyProblems = EditorGUILayout.ToggleLeft(DoskerLocale.Tr("Só categorias abaixo de Good", "Only categories below Good"), onlyProblems);
-            DoskerEditorUi.TableHeader(Columns, ref sortColumn, ref ascending);
+            var columns = Columns;
+            DoskerEditorUi.TableHeader(columns, ref sortColumn, ref ascending);
             foreach (var category in BudgetProbe.Categories)
             {
                 var rating = BudgetProbe.RatingOf(predictedStats, category);
@@ -237,7 +259,7 @@ namespace DoskerTools.PerformanceBudget
                 }
 
                 var row = GUILayoutUtility.GetRect(1f, 18f, GUILayout.ExpandWidth(true));
-                var cells = DoskerEditorUi.TableCells(row, Columns);
+                var cells = DoskerEditorUi.TableCells(row, columns);
                 GUI.Label(cells[0], category, EditorStyles.miniLabel);
                 DrawValue(cells[1], scene.Get(category), sceneStats, category);
                 DrawValue(cells[2], predicted.Get(category), predictedStats, category);

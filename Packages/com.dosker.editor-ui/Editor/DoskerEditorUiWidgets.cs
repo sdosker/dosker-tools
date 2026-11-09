@@ -212,7 +212,22 @@ namespace DoskerTools.EditorUi
                     Application.OpenURL(DoskerLocale.IssuesUrl);
                 }
                 GUILayout.FlexibleSpace();
-                DoskerLocale.Language = (DoskerLanguage)EditorGUILayout.EnumPopup(DoskerLocale.Language, EditorStyles.miniPullDown, GUILayout.Width(90f));
+                LanguageButton(EditorStyles.miniPullDown);
+            }
+        }
+
+        // Globo com a sigla do idioma ("EN", "PT"). Abre o menu com os idiomas escritos no próprio idioma,
+        // para quem não lê o idioma atual achar o seu.
+        public static void LanguageButton(GUIStyle style = null)
+        {
+            style = style ?? EditorStyles.toolbarDropDown;
+            // Ícone embutido, não emoji: as fontes do Editor não têm o caractere do globo.
+            var icon = Icon(DoskerLocale.GlobeIcon);
+            var content = new GUIContent(icon != null ? " " + DoskerLocale.ShortCode : DoskerLocale.ShortCode, icon, "Language / Idioma");
+            var rect = GUILayoutUtility.GetRect(content, style, GUILayout.Width(52f));
+            if (GUI.Button(rect, content, style))
+            {
+                DoskerLocale.ShowMenu(rect);
             }
         }
     }

@@ -1,7 +1,7 @@
 {
   "name": "com.dosker.compressor-exclusions",
   "displayName": "Dosker Tools - Compressor Exclusions",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "unity": "2022.3",
   "description": "Escolha quais parâmetros o compressor do VRCFury pode comprimir. Requer VRCFury. Uso não comercial.",
   "author": {
@@ -11,6 +11,7 @@
   },
   "license": "SEE LICENSE IN LICENSE.md",
   "vpmDependencies": {
+    "com.dosker.editor-ui": ">=0.8.0",
     "com.vrchat.avatars": ">=3.7.0"
   }
 }

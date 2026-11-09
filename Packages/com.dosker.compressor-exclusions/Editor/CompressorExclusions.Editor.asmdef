@@ -2,6 +2,7 @@
     "name": "CompressorExclusions.Editor",
     "rootNamespace": "CompressorExclusions",
     "references": [
+        "DoskerTools.EditorUi",
         "VRC.SDKBase.Editor.BuildPipeline"
     ],
     "includePlatforms": [

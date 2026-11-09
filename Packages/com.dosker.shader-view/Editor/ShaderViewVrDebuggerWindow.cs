@@ -9,11 +9,12 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using static DoskerTools.EditorUi.DoskerLocale;
 using Debug = UnityEngine.Debug;
 using Object = UnityEngine.Object;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
-public sealed class ShaderViewVrDebuggerWindow : EditorWindow
+public sealed partial class ShaderViewVrDebuggerWindow : EditorWindow
 {
     private const int FirstUserLayer = 8;
     private const string SceneAsset = "Assets/ShaderView/ShaderViewPreview.unity";
@@ -23,19 +24,20 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
     private const string TestObjectName = "Shader under test / ScreenSpace Ubershader";
     private static readonly string[] VrAspectLabels = { "1:1", "4:3", "16:9", "21:9" };
     private static readonly float[] VrAspectRatios = { 1f, 4f / 3f, 16f / 9f, 21f / 9f };
-    private static readonly string[] TabLabels = { "Debugger", "Estéreo" };
+    // Listas com texto são propriedades para seguir o idioma escolhido.
+    private static string[] TabLabels => new[] { "Debugger", Tr("Estéreo", "Stereo") };
     private const string SettingsFile = "ShaderView";
-    private static readonly string[] AmbientLabels = { "Da cena", "Sem luz ambiente", "Noite", "Dia" };
+    private static string[] AmbientLabels => new[] { Tr("Da cena", "From the scene"), Tr("Sem luz ambiente", "No ambient light"), Tr("Noite", "Night"), Tr("Dia", "Day") };
     private static readonly Color[] AmbientColors = { Color.clear, Color.black, new Color(0.05f, 0.06f, 0.1f), new Color(0.75f, 0.78f, 0.82f) };
     private static readonly Regex VrChatGlobal = new Regex(@"_VRChat\w+", RegexOptions.Compiled);
 
     // Valores aproximados por faixa de FOV. Não representam a óptica de um modelo específico.
-    private static readonly (string label, float fov, float ipd, float cant, float asymmetry)[] StereoPresets =
+    private static (string label, float fov, float ipd, float cant, float asymmetry)[] StereoPresets => new[]
     {
-        ("Estreito (≈90°)", 90f, 0.063f, 0f, 0.04f),
-        ("Comum (≈105°)", 105f, 0.064f, 0f, 0.06f),
-        ("Amplo (≈125°)", 125f, 0.064f, 5f, 0.08f),
-        ("Ultra-amplo inclinado (≈150°)", 150f, 0.064f, 10f, 0.12f),
+        (Tr("Estreito (≈90°)", "Narrow (≈90°)"), 90f, 0.063f, 0f, 0.04f),
+        (Tr("Comum (≈105°)", "Typical (≈105°)"), 105f, 0.064f, 0f, 0.06f),
+        (Tr("Amplo (≈125°)", "Wide (≈125°)"), 125f, 0.064f, 5f, 0.08f),
+        (Tr("Ultra-amplo inclinado (≈150°)", "Ultra-wide canted (≈150°)"), 150f, 0.064f, 10f, 0.12f),
     };
 
     // Globais que o cliente do VRChat define: ver creators.vrchat.com, "VRChat Shader Globals".
@@ -110,6 +112,8 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
     private double lastCaptureMilliseconds;
     private string shaderGlobalsText = "";
     private Shader shaderGlobalsFor;
+    private List<string> shaderGlobalsNames = new List<string>();
+    private string shaderGlobalsLanguage;
 
     private readonly List<CameraStation> stations = new List<CameraStation>();
     private GameObject targetObject;
@@ -148,7 +152,8 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
     private float pimaxProjectionAsymmetry = 0.06f;
     private bool captureRequested;
     private double nextAutoRefreshTime;
-    private string captureStatus = "Configure as câmeras e clique em Capturar todas.";
+    // Nulo até a primeira mensagem, para o texto inicial seguir o idioma.
+    private string captureStatus;
     private Camera sceneViewCamera;
     private Camera leftSceneVrCamera;
     private Camera rightSceneVrCamera;
@@ -242,15 +247,6 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         window.minSize = new Vector2(640f, 400f);
         window.FindDefaultAssets();
         window.Show();
-    }
-
-    [MenuItem("Tools/Dosker Tools/ShaderView/Validar (usa a cena de teste)")]
-    private static void RunValidationFromMenu()
-    {
-        if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
-        {
-            RunAutomatedValidation();
-        }
     }
 
     private void LoadSettings()
@@ -495,7 +491,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             GUILayout.Space(6f);
             var complete = stations.Count >= stationCount;
             DoskerEditorUi.StatusPill(
-                string.Format("{0} / {1} capturas{2}", stations.Count, stationCount, autoRefresh ? " · contínua" : string.Empty),
+                string.Format(Tr("{0} / {1} capturas{2}", "{0} / {1} captures{2}"), stations.Count, stationCount, autoRefresh ? Tr(" · contínua", " · continuous") : string.Empty),
                 complete ? DoskerEditorUi.Green : DoskerEditorUi.Yellow,
                 16f);
             if (lastCaptureMilliseconds > 0.0)
@@ -504,11 +500,11 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 GUILayout.Label(string.Format("{0:0.0} ms · {1:0} MB", lastCaptureMilliseconds, CaptureMemoryMegabytes()), EditorStyles.miniLabel);
             }
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button(DoskerEditorUi.Content(" Abrir cena de teste", "SceneAsset Icon"), EditorStyles.toolbarButton))
+            if (GUILayout.Button(DoskerEditorUi.Content(Tr(" Abrir cena de teste", " Open test scene"), "SceneAsset Icon"), EditorStyles.toolbarButton))
             {
                 OpenPreviewScene();
             }
-            if (GUILayout.Button(DoskerEditorUi.Content(" Localizar objeto do shader", "Search Icon"), EditorStyles.toolbarButton))
+            if (GUILayout.Button(DoskerEditorUi.Content(Tr(" Localizar objeto do shader", " Find shader object"), "Search Icon"), EditorStyles.toolbarButton))
             {
                 FindDefaultAssets();
                 if (targetObject != null)
@@ -517,6 +513,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                     EditorGUIUtility.PingObject(targetObject);
                 }
             }
+            DoskerEditorUi.LanguageButton();
         }
     }
 
@@ -529,7 +526,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
     private void DrawProfilesCard()
     {
-        using (var card = new DoskerEditorUi.CardScope("Debugger.Profiles", "Perfis e globais", "SaveAs", DoskerEditorUi.Purple, defaultExpanded: false))
+        using (var card = new DoskerEditorUi.CardScope("Debugger.Profiles", Tr("Perfis e globais", "Profiles and globals"), "SaveAs", DoskerEditorUi.Purple, defaultExpanded: false))
         {
             if (!card.Expanded)
             {
@@ -541,7 +538,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 presetName = EditorGUILayout.TextField(presetName);
                 using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(presetName)))
                 {
-                    if (GUILayout.Button("Salvar", GUILayout.Width(60f)))
+                    if (GUILayout.Button(Tr("Salvar", "Save"), GUILayout.Width(60f)))
                     {
                         var profile = CurrentProfile();
                         profile.Name = presetName.Trim();
@@ -559,7 +556,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                         ApplyProfile(preset);
                         captureRequested = true;
                     }
-                    if (GUILayout.Button("Remover", EditorStyles.miniButton, GUILayout.Width(60f)))
+                    if (GUILayout.Button(Tr("Remover", "Remove"), EditorStyles.miniButton, GUILayout.Width(60f)))
                     {
                         savedSettings.Presets.Remove(preset);
                     }
@@ -567,14 +564,14 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             }
 
             EditorGUILayout.Space(4f);
-            var nextAmbient = EditorGUILayout.Popup("Luz ambiente", ambient, AmbientLabels);
+            var nextAmbient = EditorGUILayout.Popup(Tr("Luz ambiente", "Ambient light"), ambient, AmbientLabels);
             if (nextAmbient != ambient)
             {
                 ambient = nextAmbient;
                 captureRequested = true;
             }
 
-            EditorGUILayout.LabelField("Globais extras, aplicadas só durante a captura", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(Tr("Globais extras, aplicadas só durante a captura", "Extra globals, applied only during the capture"), EditorStyles.miniLabel);
             foreach (var global in customGlobals.ToList())
             {
                 using (new EditorGUILayout.HorizontalScope())
@@ -590,7 +587,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                     }
                 }
             }
-            if (GUILayout.Button("Adicionar global"))
+            if (GUILayout.Button(Tr("Adicionar global", "Add global")))
             {
                 customGlobals.Add(new CustomGlobal());
             }
@@ -601,7 +598,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
     {
         using (var card = new DoskerEditorUi.CardScope(
             "Debugger.About",
-            "Sobre as capturas",
+            Tr("Sobre as capturas", "About the captures"),
             "_Help",
             DoskerEditorUi.Neutral,
             defaultExpanded: false))
@@ -613,15 +610,20 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
             var depthLightCount = Mathf.Max(0, stationCount - 1);
             EditorGUILayout.HelpBox(
-                "A prévia VR única acompanha a câmera ativa da Scene View. As capturas adicionais são mono e ficam nas distâncias configuradas, " +
-                "todas usando o mesmo perfil de contexto acima. A referência renderiza o mundo sem o objeto-alvo e depois captura só o alvo " +
-                "com a profundidade do mundo isolada; as demais usam o mesmo processo com DepthLight ativa, " +
-                "intensidade 0,01, sombras Hard e modo Baked.",
+                Tr("A prévia VR única acompanha a câmera ativa da Scene View. As capturas adicionais são mono e ficam nas distâncias configuradas, " +
+                   "todas usando o mesmo perfil de contexto acima. A referência renderiza o mundo sem o objeto-alvo e depois captura só o alvo " +
+                   "com a profundidade do mundo isolada; as demais usam o mesmo processo com DepthLight ativa, " +
+                   "intensidade 0,01, sombras Hard e modo Baked.",
+                   "The single VR preview follows the active Scene View camera. The extra captures are mono and sit at the configured distances, " +
+                   "all using the same context profile above. The reference renders the world without the target object, then captures only the target " +
+                   "with the world depth isolated; the others use the same process with DepthLight on, " +
+                   "intensity 0.01, Hard shadows and Baked mode."),
                 MessageType.Info);
 
             EditorGUILayout.LabelField(
                 string.Format(
-                    "Distâncias: {0} · início: {1:0.##} m · intervalo: {2:0.##} m · VR Scene View: 1 · sem depth/DepthLight: 1 · com DepthLight: {3}",
+                    Tr("Distâncias: {0} · início: {1:0.##} m · intervalo: {2:0.##} m · VR Scene View: 1 · sem depth/DepthLight: 1 · com DepthLight: {3}",
+                       "Distances: {0} · start: {1:0.##} m · interval: {2:0.##} m · VR Scene View: 1 · without depth/DepthLight: 1 · with DepthLight: {3}"),
                     stationCount,
                     firstDistance,
                     intervalMeters,
@@ -629,8 +631,10 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 EditorStyles.wordWrappedMiniLabel);
 
             EditorGUILayout.HelpBox(
-                "A DepthLight não cria mapa de profundidade: a depth texture vem da geometria. A simulação controla as ramificações do shader, " +
-                "mas não substitui o runtime XR/VRChat.",
+                Tr("A DepthLight não cria mapa de profundidade: a depth texture vem da geometria. A simulação controla as ramificações do shader, " +
+                   "mas não substitui o runtime XR/VRChat.",
+                   "The DepthLight doesn't create a depth map: the depth texture comes from the geometry. The simulation drives the shader branches, " +
+                   "but doesn't replace the XR/VRChat runtime."),
                 MessageType.Warning);
         }
     }
@@ -645,15 +649,15 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 captureRequested = true;
             }
             EditorGUILayout.Space(2f);
-            autoRefresh = EditorGUILayout.ToggleLeft("Atualização contínua", autoRefresh);
+            autoRefresh = EditorGUILayout.ToggleLeft(Tr("Atualização contínua", "Continuous refresh"), autoRefresh);
             if (autoRefresh)
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUILayout.LabelField("FPS da captura", GUILayout.Width(100f));
+                    EditorGUILayout.LabelField(Tr("FPS da captura", "Capture FPS"), GUILayout.Width(100f));
                     refreshRate = EditorGUILayout.IntPopup(
                         refreshRate,
-                        new[] { "Nativo (Scene View)", "2", "5", "10", "15", "30", "60" },
+                        new[] { Tr("Nativo (Scene View)", "Native (Scene View)"), "2", "5", "10", "15", "30", "60" },
                         new[] { 0, 2, 5, 10, 15, 30, 60 });
                 }
             }
@@ -668,53 +672,53 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             DrawTargetCard();
 
             EditorGUI.BeginChangeCheck();
-            using (var card = new DoskerEditorUi.CardScope("Debugger.Cameras", "Câmeras e distâncias", "Camera Icon", DoskerEditorUi.Blue))
+            using (var card = new DoskerEditorUi.CardScope("Debugger.Cameras", Tr("Câmeras e distâncias", "Cameras and distances"), "Camera Icon", DoskerEditorUi.Blue))
             {
                 if (card.Expanded)
                 {
-                    stationCount = EditorGUILayout.IntSlider("Quantidade de distâncias", stationCount, 1, 24);
-                    firstDistance = EditorGUILayout.Slider("Primeira distância (m)", firstDistance, 0.1f, 20f);
-                    intervalMeters = EditorGUILayout.Slider("Intervalo entre câmeras (m)", intervalMeters, 0.1f, 5f);
-                    cameraHeightOffset = EditorGUILayout.Slider("Altura relativa (m)", cameraHeightOffset, -2f, 3f);
-                    orbitAngleDegrees = EditorGUILayout.Slider("Rotação em volta do alvo (°)", orbitAngleDegrees, 0f, 360f);
-                    verticalFov = EditorGUILayout.Slider("FOV das câmeras (°)", verticalFov, 30f, 120f);
-                    vrAspectIndex = EditorGUILayout.Popup("Proporção da prévia VR", vrAspectIndex, VrAspectLabels);
-                    eyeSeparationMeters = EditorGUILayout.Slider("IPD estéreo (m)", eyeSeparationMeters, 0.04f, 0.08f);
-                    convergenceDistanceMeters = EditorGUILayout.Slider("Convergência estéreo (m)", convergenceDistanceMeters, 0.5f, 20f);
+                    stationCount = EditorGUILayout.IntSlider(Tr("Quantidade de distâncias", "Number of distances"), stationCount, 1, 24);
+                    firstDistance = EditorGUILayout.Slider(Tr("Primeira distância (m)", "First distance (m)"), firstDistance, 0.1f, 20f);
+                    intervalMeters = EditorGUILayout.Slider(Tr("Intervalo entre câmeras (m)", "Interval between cameras (m)"), intervalMeters, 0.1f, 5f);
+                    cameraHeightOffset = EditorGUILayout.Slider(Tr("Altura relativa (m)", "Relative height (m)"), cameraHeightOffset, -2f, 3f);
+                    orbitAngleDegrees = EditorGUILayout.Slider(Tr("Rotação em volta do alvo (°)", "Rotation around the target (°)"), orbitAngleDegrees, 0f, 360f);
+                    verticalFov = EditorGUILayout.Slider(Tr("FOV das câmeras (°)", "Camera FOV (°)"), verticalFov, 30f, 120f);
+                    vrAspectIndex = EditorGUILayout.Popup(Tr("Proporção da prévia VR", "VR preview aspect ratio"), vrAspectIndex, VrAspectLabels);
+                    eyeSeparationMeters = EditorGUILayout.Slider(Tr("IPD estéreo (m)", "Stereo IPD (m)"), eyeSeparationMeters, 0.04f, 0.08f);
+                    convergenceDistanceMeters = EditorGUILayout.Slider(Tr("Convergência estéreo (m)", "Stereo convergence (m)"), convergenceDistanceMeters, 0.5f, 20f);
                 }
             }
 
-            using (var card = new DoskerEditorUi.CardScope("Debugger.Context", "Contexto simulado", "SettingsIcon", DoskerEditorUi.Purple))
+            using (var card = new DoskerEditorUi.CardScope("Debugger.Context", Tr("Contexto simulado", "Simulated context"), "SettingsIcon", DoskerEditorUi.Purple))
             {
                 if (card.Expanded)
                 {
-                    simulatedVr = EditorGUILayout.Toggle("É VR", simulatedVr);
+                    simulatedVr = EditorGUILayout.Toggle(Tr("É VR", "Is VR"), simulatedVr);
                     using (new EditorGUI.DisabledScope(!simulatedVr))
                     {
-                        simulatedEyeIndex = EditorGUILayout.Popup("Olho simulado", simulatedEyeIndex, new[] { "Esquerdo", "Direito" });
+                        simulatedEyeIndex = EditorGUILayout.Popup(Tr("Olho simulado", "Simulated eye"), simulatedEyeIndex, new[] { Tr("Esquerdo", "Left"), Tr("Direito", "Right") });
                     }
-                    simulatedMirror = EditorGUILayout.Toggle("É espelho", simulatedMirror);
-                    simulatedPersonalMirror = EditorGUILayout.Toggle("É espelho pessoal", simulatedPersonalMirror);
+                    simulatedMirror = EditorGUILayout.Toggle(Tr("É espelho", "Is mirror"), simulatedMirror);
+                    simulatedPersonalMirror = EditorGUILayout.Toggle(Tr("É espelho pessoal", "Is personal mirror"), simulatedPersonalMirror);
                     simulatedCameraMode = EditorGUILayout.Popup(
-                        "Tipo de câmera",
+                        Tr("Tipo de câmera", "Camera type"),
                         simulatedCameraMode,
-                        new[] { "Regular", "Câmera VR de mão", "Câmera desktop de mão", "Foto / screenshot" });
-                    simulatedCameraUi = EditorGUILayout.Toggle("UI visível na câmera", simulatedCameraUi);
+                        new[] { "Regular", Tr("Câmera VR de mão", "VR handheld camera"), Tr("Câmera desktop de mão", "Desktop handheld camera"), Tr("Foto / screenshot", "Photo / screenshot") });
+                    simulatedCameraUi = EditorGUILayout.Toggle(Tr("UI visível na câmera", "UI visible to the camera"), simulatedCameraUi);
                     DrawContextWarnings();
                 }
             }
 
-            using (var card = new DoskerEditorUi.CardScope("Debugger.Output", "Resolução e prévia", "RawImage Icon", DoskerEditorUi.Green))
+            using (var card = new DoskerEditorUi.CardScope("Debugger.Output", Tr("Resolução e prévia", "Resolution and preview"), "RawImage Icon", DoskerEditorUi.Green))
             {
                 if (card.Expanded)
                 {
                     simulatedScreenHeight = EditorGUILayout.IntPopup(
-                        "Resolução (altura simulada)",
+                        Tr("Resolução (altura simulada)", "Resolution (simulated height)"),
                         simulatedScreenHeight,
-                        new[] { "720 (prévia da câmera)", "1080", "1440", "2160 (4K)" },
+                        new[] { Tr("720 (prévia da câmera)", "720 (camera preview)"), "1080", "1440", "2160 (4K)" },
                         new[] { 720, 1080, 1440, 2160 });
-                    monoColumns = EditorGUILayout.IntSlider("Colunas mono por linha", monoColumns, 1, 8);
-                    previewImageHeight = EditorGUILayout.Slider("Altura das prévias (px)", previewImageHeight, 100f, 800f);
+                    monoColumns = EditorGUILayout.IntSlider(Tr("Colunas mono por linha", "Mono columns per row"), monoColumns, 1, 8);
+                    previewImageHeight = EditorGUILayout.Slider(Tr("Altura das prévias (px)", "Preview height (px)"), previewImageHeight, 100f, 800f);
                 }
             }
             if (EditorGUI.EndChangeCheck())
@@ -724,7 +728,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
             DrawStatus();
             EditorGUILayout.EndScrollView();
-            DrawCaptureFooter("Capturar todas");
+            DrawCaptureFooter(Tr("Capturar todas", "Capture all"));
         }
     }
 
@@ -733,20 +737,22 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         if (material != null && material.HasProperty(OverlayVisibilityProperty) && !ShaderHasVrSimulation(material.shader))
         {
             EditorGUILayout.HelpBox(
-                "Este shader é anterior à simulação de VR: sem " + SimulatedVrVariable + ", a visão principal continua igual à de desktop. " +
-                "Atualize o shader para testar os filtros por VR e por olho fora de espelho.",
+                Tr("Este shader é anterior à simulação de VR: sem " + SimulatedVrVariable + ", a visão principal continua igual à de desktop. " +
+                   "Atualize o shader para testar os filtros por VR e por olho fora de espelho.",
+                   "This shader predates the VR simulation: without " + SimulatedVrVariable + ", the main view stays the same as desktop. " +
+                   "Update the shader to test the VR and per-eye filters outside mirrors."),
                 MessageType.Warning);
         }
         if (!simulatedMirror && !ShouldSimulateVr(true))
         {
             EditorGUILayout.HelpBox(
-                "A simulação de VR fica desligada em espelho pessoal, câmera de mão e foto: nada confirma que esses renders são stereo.",
+                Tr("A simulação de VR fica desligada em espelho pessoal, câmera de mão e foto: nada confirma que esses renders são stereo.", "The VR simulation is off in personal mirrors, handheld cameras and photos: nothing confirms those renders are stereo."),
                 MessageType.Info);
         }
         if (simulatedCameraMode == 1 && !simulatedMirror)
         {
             EditorGUILayout.HelpBox(
-                "Câmera VR de mão segue o filtro Camera_Desktop: o filtro Camera_VR fica dentro de isVR(), que é falso em câmera não stereo.",
+                Tr("Câmera VR de mão segue o filtro Camera_Desktop: o filtro Camera_VR fica dentro de isVR(), que é falso em câmera não stereo.", "The VR handheld camera follows the Camera_Desktop filter: the Camera_VR filter sits inside isVR(), which is false on a non-stereo camera."),
                 MessageType.Info);
         }
         if (material != null
@@ -754,8 +760,10 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             && material.GetFloat(OverlayVisibilityProperty) < 0.5f)
         {
             EditorGUILayout.HelpBox(
-                "O material está com Overlay/Visibility desligado: os filtros por contexto (espelho, câmera, olho) não são avaliados, " +
-                "então mudar o contexto não altera o overlay.",
+                Tr("O material está com Overlay/Visibility desligado: os filtros por contexto (espelho, câmera, olho) não são avaliados, " +
+                   "então mudar o contexto não altera o overlay.",
+                   "The material has Overlay/Visibility off: the context filters (mirror, camera, eye) aren't evaluated, " +
+                   "so changing the context doesn't change the overlay."),
                 MessageType.Warning);
         }
     }
@@ -770,9 +778,15 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             var names = File.Exists(assetPath)
                 ? VrChatGlobal.Matches(File.ReadAllText(assetPath)).Cast<Match>().Select(match => match.Value).Distinct().OrderBy(name => name).ToList()
                 : new List<string>();
-            shaderGlobalsText = names.Count == 0
-                ? "O arquivo do shader não cita globais do VRChat, então o contexto simulado pode não mudar nada."
-                : "O shader lê: " + string.Join(", ", names);
+            shaderGlobalsNames = names;
+            shaderGlobalsLanguage = null;
+        }
+        if (shaderGlobalsLanguage != ShortCode)
+        {
+            shaderGlobalsLanguage = ShortCode;
+            shaderGlobalsText = shaderGlobalsNames.Count == 0
+                ? Tr("O arquivo do shader não cita globais do VRChat, então o contexto simulado pode não mudar nada.", "The shader file doesn't mention any VRChat globals, so the simulated context may change nothing.")
+                : Tr("O shader lê: ", "The shader reads: ") + string.Join(", ", shaderGlobalsNames);
         }
         return shaderGlobalsText;
     }
@@ -794,7 +808,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
     private void DrawTargetCard()
     {
-        using (var card = new DoskerEditorUi.CardScope("Debugger.Target", "Alvo", "GameObject Icon", DoskerEditorUi.Cyan))
+        using (var card = new DoskerEditorUi.CardScope("Debugger.Target", Tr("Alvo", "Target"), "GameObject Icon", DoskerEditorUi.Cyan))
         {
             if (!card.Expanded)
             {
@@ -802,7 +816,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             }
 
             var nextTarget = (GameObject)EditorGUILayout.ObjectField(
-                "Objeto do shader",
+                Tr("Objeto do shader", "Shader object"),
                 targetObject,
                 typeof(GameObject),
                 true);
@@ -815,7 +829,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
             using (new EditorGUI.DisabledScope(Selection.activeGameObject == null))
             {
-                if (GUILayout.Button("Usar a seleção como alvo"))
+                if (GUILayout.Button(Tr("Usar a seleção como alvo", "Use the selection as target")))
                 {
                     targetObject = Selection.activeGameObject;
                     ResolveTargetMaterial();
@@ -824,7 +838,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             }
 
             var nextMaterial = (Material)EditorGUILayout.ObjectField(
-                "Material no Inspector (opcional)",
+                Tr("Material no Inspector (opcional)", "Inspector material (optional)"),
                 material,
                 typeof(Material),
                 false);
@@ -844,19 +858,21 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             if (material == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Sem material para abrir no Inspector. As capturas continuam usando os materiais do objeto.",
+                    Tr("Sem material para abrir no Inspector. As capturas continuam usando os materiais do objeto.", "No material to open in the Inspector. The captures keep using the object's materials."),
                     MessageType.None);
             }
             else if (!IsUsableMaterial(material))
             {
                 EditorGUILayout.HelpBox(
-                    "O material do Inspector está inválido. As capturas não são bloqueadas; será usado o primeiro material do objeto, se disponível.",
+                    Tr("O material do Inspector está inválido. As capturas não são bloqueadas; será usado o primeiro material do objeto, se disponível.", "The Inspector material is invalid. Captures aren't blocked; the object's first material will be used, if available."),
                     MessageType.Warning);
             }
 
             EditorGUILayout.HelpBox(
-                "O inspector original edita as propriedades do material e do shader; ele não controla as câmeras. " +
-                "Abra-o no Inspector normal para preservar espaço para as imagens.",
+                Tr("O inspector original edita as propriedades do material e do shader; ele não controla as câmeras. " +
+                   "Abra-o no Inspector normal para preservar espaço para as imagens.",
+                   "The original inspector edits the material and shader properties; it doesn't control the cameras. " +
+                   "Open it in the regular Inspector to keep room for the images."),
                 MessageType.None);
             DrawSelectMaterialButton();
         }
@@ -869,7 +885,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         var previousChanged = GUI.changed;
         using (new EditorGUI.DisabledScope(material == null))
         {
-            if (GUILayout.Button(DoskerEditorUi.Content(" Selecionar material no Inspector do Unity", "Material Icon")))
+            if (GUILayout.Button(DoskerEditorUi.Content(Tr(" Selecionar material no Inspector do Unity", " Select material in the Unity Inspector"), "Material Icon")))
             {
                 Selection.activeObject = material;
                 EditorGUIUtility.PingObject(material);
@@ -886,26 +902,26 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             cameraScroll = EditorGUILayout.BeginScrollView(cameraScroll, GUILayout.ExpandHeight(true));
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Prévia VR estéreo · câmera da Scene View", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(Tr("Prévia VR estéreo · câmera da Scene View", "Stereo VR preview · Scene View camera"), EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
                 DoskerEditorUi.Badge(string.Format("IPD {0:0} mm", eyeSeparationMeters * 1000f), DoskerEditorUi.Blue);
             }
             using (new EditorGUILayout.HorizontalScope())
             {
-                DrawEyeImage("OLHO ESQUERDO · Scene View", leftSceneVrImage, previewImageHeight);
-                DrawEyeImage("OLHO DIREITO · Scene View", rightSceneVrImage, previewImageHeight);
+                DrawEyeImage(Tr("OLHO ESQUERDO · Scene View", "LEFT EYE · Scene View"), leftSceneVrImage, previewImageHeight);
+                DrawEyeImage(Tr("OLHO DIREITO · Scene View", "RIGHT EYE · Scene View"), rightSceneVrImage, previewImageHeight);
             }
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Capturas mono por distância", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(Tr("Capturas mono por distância", "Mono captures by distance"), EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
                 DoskerEditorUi.Badge(string.Format("{0} / {1}", stations.Count, stationCount), DoskerEditorUi.Blue);
             }
 
             if (stations.Count == 0)
             {
-                EditorGUILayout.HelpBox(captureStatus, MessageType.None);
+                EditorGUILayout.HelpBox(captureStatus ?? Tr("Configure as câmeras e clique em Capturar todas.", "Set up the cameras and click Capture all."), MessageType.None);
             }
 
             var columnCount = Mathf.Clamp(monoColumns, 1, 8);
@@ -933,10 +949,10 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 DoskerEditorUi.Badge(string.Format("{0:0.##} m", station.Distance), DoskerEditorUi.Blue);
                 if (station.Index == 0)
                 {
-                    DoskerEditorUi.Badge("sem depth", DoskerEditorUi.Yellow);
+                    DoskerEditorUi.Badge(Tr("sem depth", "no depth"), DoskerEditorUi.Yellow);
                 }
             }
-            DrawEyeImage("Contexto selecionado · mono", station.Image, Mathf.Min(previewImageHeight * 0.6f, 220f));
+            DrawEyeImage(Tr("Contexto selecionado · mono", "Selected context · mono"), station.Image, Mathf.Min(previewImageHeight * 0.6f, 220f));
         }
     }
 
@@ -948,11 +964,13 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             DrawPimaxSettings();
             EditorGUILayout.Space(2f);
             EditorGUILayout.HelpBox(
-                "Renderiza os dois olhos em uma única imagem lado a lado, com FOV, inclinação e projeção assimétrica ajustáveis. " +
-                "É uma aproximação visual: não acessa o perfil óptico nem as matrizes reais do SteamVR/Pimax.",
+                Tr("Renderiza os dois olhos em uma única imagem lado a lado, com FOV, inclinação e projeção assimétrica ajustáveis. " +
+                   "É uma aproximação visual: não acessa o perfil óptico nem as matrizes reais do SteamVR/Pimax.",
+                   "Renders both eyes into one side-by-side image, with adjustable FOV, canting and asymmetric projection. " +
+                   "It's a visual approximation: it doesn't access the optical profile or the real SteamVR/Pimax matrices."),
                 MessageType.Warning);
             EditorGUILayout.EndScrollView();
-            DrawCaptureFooter("Capturar estéreo");
+            DrawCaptureFooter(Tr("Capturar estéreo", "Capture stereo"));
         }
     }
 
@@ -963,11 +981,11 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             pimaxImageScroll = EditorGUILayout.BeginScrollView(pimaxImageScroll, GUILayout.ExpandHeight(true));
             if (pimaxStereoImage != null && pimaxStereoImage.IsCreated())
             {
-                DrawEyeImage("Resultado estereoscópico · olho esquerdo | olho direito", pimaxStereoImage, previewImageHeight);
+                DrawEyeImage(Tr("Resultado estereoscópico · olho esquerdo | olho direito", "Stereoscopic result · left eye | right eye"), pimaxStereoImage, previewImageHeight);
             }
             else
             {
-                EditorGUILayout.HelpBox("Configure o perfil e clique em Capturar estéreo para gerar a imagem.", MessageType.None);
+                EditorGUILayout.HelpBox(Tr("Configure o perfil e clique em Capturar estéreo para gerar a imagem.", "Set up the profile and click Capture stereo to create the image."), MessageType.None);
             }
             EditorGUILayout.EndScrollView();
         }
@@ -975,7 +993,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
 
     private void DrawPimaxSettings()
     {
-        var preset = EditorGUILayout.Popup("Faixa de FOV", -1, StereoPresets.Select(item => item.label).ToArray());
+        var preset = EditorGUILayout.Popup(Tr("Faixa de FOV", "FOV range"), -1, StereoPresets.Select(item => item.label).ToArray());
         if (preset >= 0)
         {
             pimaxVerticalFov = StereoPresets[preset].fov;
@@ -986,12 +1004,12 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         }
 
         EditorGUI.BeginChangeCheck();
-        using (var card = new DoskerEditorUi.CardScope("Pimax.Target", "Alvo", "GameObject Icon", DoskerEditorUi.Cyan))
+        using (var card = new DoskerEditorUi.CardScope("Pimax.Target", Tr("Alvo", "Target"), "GameObject Icon", DoskerEditorUi.Cyan))
         {
             if (card.Expanded)
             {
                 var nextTarget = (GameObject)EditorGUILayout.ObjectField(
-                    "Objeto do shader",
+                    Tr("Objeto do shader", "Shader object"),
                     targetObject,
                     typeof(GameObject),
                     true);
@@ -1003,7 +1021,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
                 }
 
                 var nextMaterial = (Material)EditorGUILayout.ObjectField(
-                    "Material no Inspector (opcional)",
+                    Tr("Material no Inspector (opcional)", "Inspector material (optional)"),
                     material,
                     typeof(Material),
                     false);
@@ -1018,21 +1036,21 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             }
         }
 
-        using (var card = new DoskerEditorUi.CardScope("Pimax.Projection", "Projeção estereoscópica", "Camera Icon", DoskerEditorUi.Purple))
+        using (var card = new DoskerEditorUi.CardScope("Pimax.Projection", Tr("Projeção estereoscópica", "Stereoscopic projection"), "Camera Icon", DoskerEditorUi.Purple))
         {
             if (card.Expanded)
             {
-                pimaxVerticalFov = EditorGUILayout.Slider("FOV vertical por olho (°)", pimaxVerticalFov, 60f, 140f);
-                pimaxAspectIndex = EditorGUILayout.Popup("Proporção de cada olho", pimaxAspectIndex, VrAspectLabels);
+                pimaxVerticalFov = EditorGUILayout.Slider(Tr("FOV vertical por olho (°)", "Vertical FOV per eye (°)"), pimaxVerticalFov, 60f, 140f);
+                pimaxAspectIndex = EditorGUILayout.Popup(Tr("Proporção de cada olho", "Aspect ratio of each eye"), pimaxAspectIndex, VrAspectLabels);
                 eyeSeparationMeters = EditorGUILayout.Slider("IPD (m)", eyeSeparationMeters, 0.04f, 0.08f);
                 convergenceDistanceMeters = EditorGUILayout.Slider(
-                    "Convergência estéreo (m)",
+                    Tr("Convergência estéreo (m)", "Stereo convergence (m)"),
                     convergenceDistanceMeters,
                     0.5f,
                     20f);
-                pimaxEyeCantDegrees = EditorGUILayout.Slider("Inclinação das lentes (°)", pimaxEyeCantDegrees, 0f, 15f);
+                pimaxEyeCantDegrees = EditorGUILayout.Slider(Tr("Inclinação das lentes (°)", "Lens canting (°)"), pimaxEyeCantDegrees, 0f, 15f);
                 pimaxProjectionAsymmetry = EditorGUILayout.Slider(
-                    "Assimetria horizontal por olho",
+                    Tr("Assimetria horizontal por olho", "Horizontal asymmetry per eye"),
                     pimaxProjectionAsymmetry,
                     0f,
                     0.2f);
@@ -1043,11 +1061,11 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             captureRequested = true;
         }
 
-        using (var card = new DoskerEditorUi.CardScope("Pimax.Output", "Prévia", "RawImage Icon", DoskerEditorUi.Green))
+        using (var card = new DoskerEditorUi.CardScope("Pimax.Output", Tr("Prévia", "Preview"), "RawImage Icon", DoskerEditorUi.Green))
         {
             if (card.Expanded)
             {
-                previewImageHeight = EditorGUILayout.Slider("Altura da prévia (px)", previewImageHeight, 100f, 800f);
+                previewImageHeight = EditorGUILayout.Slider(Tr("Altura da prévia (px)", "Preview height (px)"), previewImageHeight, 100f, 800f);
             }
         }
     }
@@ -1126,7 +1144,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
     {
         if (targetObject == null)
         {
-            captureStatus = "Selecione o objeto do shader antes de capturar.";
+            captureStatus = Tr("Selecione o objeto do shader antes de capturar.", "Select the shader object before capturing.");
             return false;
         }
         ResolveTargetMaterial();
@@ -1247,7 +1265,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         }
 
         captureStatus = string.Format(
-            "Captura concluída: {0} prévia VR da Scene View + {1} câmeras mono = {2} imagens Unity.",
+            Tr("Captura concluída: {0} prévia VR da Scene View + {1} câmeras mono = {2} imagens Unity.", "Capture done: {0} Scene View VR preview + {1} mono cameras = {2} Unity images."),
             sceneViewCaptured ? 1 : 0,
             stations.Count,
             stations.Count + (sceneViewCaptured ? 1 : 0));
@@ -1261,7 +1279,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         {
             if (CapturePimaxPreview())
             {
-                captureStatus = "Captura concluída: os dois olhos foram renderizados em uma única imagem.";
+                captureStatus = Tr("Captura concluída: os dois olhos foram renderizados em uma única imagem.", "Capture done: both eyes were rendered into a single image.");
             }
         }
         finally
@@ -1394,7 +1412,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         }
         if (sceneViewCamera == null)
         {
-            captureStatus = "Não há uma Scene View ativa para a prévia VR.";
+            captureStatus = Tr("Não há uma Scene View ativa para a prévia VR.", "There is no active Scene View for the VR preview.");
             DestroyRenderTexture(leftSceneVrImage);
             DestroyRenderTexture(rightSceneVrImage);
             leftSceneVrImage = null;
@@ -1451,7 +1469,7 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         }
         if (sceneViewCamera == null)
         {
-            captureStatus = "Não há uma câmera de Scene View ativa para a prévia estéreo.";
+            captureStatus = Tr("Não há uma câmera de Scene View ativa para a prévia estéreo.", "There is no active Scene View camera for the stereo preview.");
             return false;
         }
 
@@ -1707,14 +1725,14 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
         {
             EditorUtility.DisplayDialog(
                 "ShaderView",
-                "Saia do Play Mode antes de abrir novamente a cena de teste.",
+                Tr("Saia do Play Mode antes de abrir novamente a cena de teste.", "Exit Play Mode before opening the test scene again."),
                 "OK");
             return;
         }
 
         if (string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(SceneAsset, AssetPathToGUIDOptions.OnlyExistingAssets)))
         {
-            captureStatus = "A cena de teste não está neste projeto. Selecione o objeto do shader.";
+            captureStatus = Tr("A cena de teste não está neste projeto. Selecione o objeto do shader.", "The test scene isn't in this project. Select the shader object.");
             return;
         }
 
@@ -1742,603 +1760,6 @@ public sealed class ShaderViewVrDebuggerWindow : EditorWindow
             Handles.color = index == 0 ? Color.yellow : new Color(1f, 0.35f, 0.12f);
             Handles.SphereHandleCap(0, position, Quaternion.identity, 0.12f, EventType.Repaint);
             Handles.Label(position, string.Format("{0:0.##} m", distance));
-        }
-    }
-
-    // A validação também roda pelo menu, e ali o Editor precisa continuar aberto.
-    private static void ExitIfBatch()
-    {
-        if (Application.isBatchMode)
-        {
-            EditorApplication.Exit(0);
-        }
-    }
-
-    public static void RunAutomatedValidation()
-    {
-        var shader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath(ShaderGuid));
-        var previewMaterial = AssetDatabase.LoadAssetAtPath<Material>(MaterialAsset);
-        if (shader == null || previewMaterial == null)
-        {
-            throw new System.InvalidOperationException("The preview shader or material was not imported.");
-        }
-        if (ShaderUtil.ShaderHasError(shader) || !shader.isSupported)
-        {
-            throw new System.InvalidOperationException("The preview shader has compile errors or is unsupported.");
-        }
-        AssertShaderSupportsDebugger(shader);
-
-        previewMaterial.shader = shader;
-        var currentScene = SceneManager.GetActiveScene();
-        if (currentScene.path != SceneAsset)
-        {
-            currentScene = EditorSceneManager.OpenScene(SceneAsset, OpenSceneMode.Single);
-        }
-        var target = GameObject.Find(TestObjectName);
-        if (target == null)
-        {
-            throw new System.InvalidOperationException("The shader test object is missing from the preview scene.");
-        }
-
-        var targetMaterial = GetFirstTargetMaterial(target);
-        var debugger = CreateInstance<ShaderViewVrDebuggerWindow>();
-        debugger.UseDefaultSettings();
-        if (!debugger.autoRefresh || debugger.refreshRate != 0)
-        {
-            throw new System.InvalidOperationException(
-                "Automatic capture should default to the native Scene View refresh rate.");
-        }
-        debugger.targetObject = target;
-        debugger.material = null;
-        debugger.ResolveTargetMaterial();
-        if (targetMaterial != null && debugger.material != targetMaterial)
-        {
-            throw new System.InvalidOperationException(
-                "An unspecified Inspector material should resolve to the target object's first renderer material.");
-        }
-        if (!debugger.CanCapture())
-        {
-            throw new System.InvalidOperationException("Camera captures must not require a separately selected Inspector material.");
-        }
-        debugger.material = previewMaterial;
-        debugger.materialManuallySelected = true;
-        debugger.ResolveTargetMaterial();
-        if (debugger.material != previewMaterial)
-        {
-            throw new System.InvalidOperationException("A valid manually selected Inspector material should be preserved.");
-        }
-        debugger.stationCount = 10;
-        debugger.firstDistance = 1f;
-        debugger.intervalMeters = 1f;
-        debugger.simulatedScreenHeight = 720;
-        debugger.CreateCameraStations();
-        var orbitTestStation = debugger.stations[0];
-        var initialOrbitPosition = orbitTestStation.Camera.transform.position;
-        debugger.orbitAngleDegrees = 90f;
-        debugger.UpdateDistanceCamera(orbitTestStation);
-        var quarterTurnPosition = orbitTestStation.Camera.transform.position;
-        debugger.orbitAngleDegrees = 360f;
-        debugger.UpdateDistanceCamera(orbitTestStation);
-        var fullTurnPosition = orbitTestStation.Camera.transform.position;
-        debugger.orbitAngleDegrees = 0f;
-        debugger.UpdateDistanceCamera(orbitTestStation);
-        if (Vector3.Distance(initialOrbitPosition, quarterTurnPosition) < 0.1f
-            || Vector3.Distance(initialOrbitPosition, fullTurnPosition) > 0.001f)
-        {
-            throw new System.InvalidOperationException(
-                "Camera orbit rotation must move stations and return to their original positions at 360 degrees.");
-        }
-        debugger.CaptureAutomatedFrames();
-        debugger.ValidateVrSimulation(shader);
-        debugger.selectedTab = 1;
-        if (!debugger.CapturePimaxPreview())
-        {
-            throw new System.InvalidOperationException("A Scene View camera is required to validate the IF pimax preview.");
-        }
-        AssertRenderedTexture(debugger.pimaxStereoImage, 0f, "IF pimax stereo");
-        var expectedPimaxEyeWidth = Mathf.RoundToInt(
-            debugger.simulatedScreenHeight * VrAspectRatios[debugger.pimaxAspectIndex]);
-        if (debugger.pimaxStereoImage.width != expectedPimaxEyeWidth * 2
-            || CountSideBySidePixelDifferences(debugger.pimaxStereoImage) == 0)
-        {
-            throw new System.InvalidOperationException(
-                "The IF pimax preview must render distinguishable left and right eyes into a single side-by-side image.");
-        }
-        debugger.DestroyCameraStations();
-        debugger.DestroySceneVrCameras();
-        DestroyImmediate(debugger);
-
-        Debug.Log("SHADERVIEW_VALIDATION_OK: distance labels are concise; IF pimax renders distinguishable stereo eyes into one image with per-eye projection; automatic capture defaults on; orbit stations rotate through 90 and return at 360 degrees; simulated VR eye filters, head center and context exclusions work; Scene View VR eyes and ten mono stations render; reference depth is isolated and DepthLight settings are preserved.");
-        ExitIfBatch();
-    }
-
-    public static void RunMaterialResolutionValidation()
-    {
-        var shader = Shader.Find("Standard");
-        if (shader == null)
-        {
-            throw new System.InvalidOperationException("Unity's Standard shader is required for material resolution validation.");
-        }
-
-        var target = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        var renderer = target.GetComponent<Renderer>();
-        var targetMaterial = new Material(shader) { name = "ShaderView target material validation" };
-        var manualMaterial = new Material(shader) { name = "ShaderView manual material validation" };
-        var debugger = CreateInstance<ShaderViewVrDebuggerWindow>();
-        debugger.UseDefaultSettings();
-        try
-        {
-            renderer.sharedMaterial = targetMaterial;
-            debugger.targetObject = target;
-            debugger.material = null;
-            debugger.ResolveTargetMaterial();
-            if (debugger.material != targetMaterial)
-            {
-                throw new System.InvalidOperationException(
-                    "The Inspector material did not default to the first material on the selected object's renderer.");
-            }
-
-            debugger.material = manualMaterial;
-            debugger.ResolveTargetMaterial();
-            if (debugger.material != targetMaterial)
-            {
-                throw new System.InvalidOperationException(
-                    "An unpinned Inspector material should follow the first material on the selected object.");
-            }
-
-            debugger.material = manualMaterial;
-            debugger.materialManuallySelected = true;
-            debugger.ResolveTargetMaterial();
-            if (debugger.material != manualMaterial)
-            {
-                throw new System.InvalidOperationException("A valid manual Inspector material was not preserved.");
-            }
-
-            debugger.material = null;
-            debugger.materialManuallySelected = false;
-            debugger.ResolveTargetMaterial();
-            if (debugger.material != targetMaterial || !debugger.CanCapture())
-            {
-                throw new System.InvalidOperationException(
-                    "Capturing must fall back to the selected object's material without requiring an Inspector selection.");
-            }
-        }
-        finally
-        {
-            DestroyImmediate(debugger);
-            DestroyImmediate(target);
-            DestroyImmediate(targetMaterial);
-            DestroyImmediate(manualMaterial);
-        }
-
-        Debug.Log("SHADERVIEW_MATERIAL_RESOLUTION_OK: renderer material fallback works, valid manual overrides are preserved, and capture has no separate material requirement.");
-        ExitIfBatch();
-    }
-
-    private static void AssertShaderSupportsDebugger(Shader shader)
-    {
-        var assetPath = AssetDatabase.GetAssetPath(shader);
-        if (!assetPath.StartsWith("Assets/", System.StringComparison.Ordinal))
-        {
-            throw new System.InvalidOperationException("The debugger shader must be stored under the Unity project's Assets folder.");
-        }
-        var importedPath = Path.Combine(Application.dataPath, assetPath.Substring("Assets/".Length));
-        var importedSource = File.ReadAllText(importedPath);
-        if (importedSource.Split(new[] { "GrabPass {" }, System.StringSplitOptions.None).Length - 1 != 1)
-        {
-            throw new System.InvalidOperationException(
-                "The Unity shader must retain its GrabPass declaration.");
-        }
-        if (!importedSource.Contains(SimulatedVrVariable))
-        {
-            throw new System.InvalidOperationException(
-                "The Unity shader predates the VR simulation variables.");
-        }
-    }
-
-    private void ValidateVrSimulation(Shader shader)
-    {
-        const int size = 256;
-        var previousContext = new ShaderContextState();
-        var previousAsyncCompilation = ShaderUtil.allowAsyncCompilation;
-        var camera = CreateSceneVrCamera("simulation test");
-        var baseline = CreateSceneVrTexture(size, size, "Simulation baseline");
-        var result = CreateSceneVrTexture(size, size, "Simulation result");
-        var effectObject = new GameObject("ShaderView simulation test effect") { hideFlags = HideFlags.HideAndDontSave };
-        // O shader lê os vértices em espaço de visão: a malha cobre a tela em qualquer pose da câmera.
-        var mesh = new Mesh
-        {
-            hideFlags = HideFlags.HideAndDontSave,
-            vertices = new[]
-            {
-                new Vector3(-4f, -4f, -1f),
-                new Vector3(4f, -4f, -1f),
-                new Vector3(4f, 4f, -1f),
-                new Vector3(-4f, 4f, -1f)
-            },
-            triangles = new[] { 0, 1, 2, 0, 2, 3 },
-            bounds = new Bounds(Vector3.zero, Vector3.one * 1000f)
-        };
-        var effectMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave, renderQueue = 4000 };
-        effectMaterial.SetFloat("BossBar", 1f);
-        effectMaterial.SetFloat(OverlayVisibilityProperty, 1f);
-        effectMaterial.SetFloat("_ZTest", 8f);
-        effectMaterial.SetFloat("_CullMode", 0f);
-        effectMaterial.SetFloat("_MinRange", 5f);
-        effectMaterial.SetFloat("_MaxRange", 10f);
-        effectObject.AddComponent<MeshFilter>().sharedMesh = mesh;
-        var effectRenderer = effectObject.AddComponent<MeshRenderer>();
-        effectRenderer.sharedMaterial = effectMaterial;
-        try
-        {
-            ShaderUtil.allowAsyncCompilation = false;
-            effectObject.transform.position = targetObject.transform.position;
-            camera.clearFlags = CameraClearFlags.Skybox;
-            camera.fieldOfView = 60f;
-            camera.aspect = 1f;
-            camera.nearClipPlane = 0.03f;
-            camera.farClipPlane = 300f;
-            camera.depthTextureMode = DepthTextureMode.Depth;
-            camera.stereoTargetEye = StereoTargetEyeMask.None;
-            camera.transform.SetPositionAndRotation(
-                effectObject.transform.position - Vector3.forward * 3f,
-                Quaternion.LookRotation(Vector3.forward));
-            var head = camera.transform.position;
-
-            int CountEffectPixels(float eyeIndex, Vector3 headCenter)
-            {
-                SetShaderContext(true, eyeIndex, camera, headCenter);
-                // A base usa o mesmo contexto: outros objetos com o shader também reagem a ele.
-                effectRenderer.enabled = false;
-                camera.targetTexture = baseline;
-                camera.Render();
-                effectRenderer.enabled = true;
-                camera.targetTexture = result;
-                camera.Render();
-                return CountPixelDifferences(baseline, result);
-            }
-
-            effectMaterial.SetFloat(OverlayVisibilityProperty + "_RightEye", 0f);
-            var hiddenPixels = CountEffectPixels(1f, head);
-            var visiblePixels = CountEffectPixels(0f, head);
-            if (hiddenPixels != 0 || visiblePixels == 0)
-            {
-                throw new System.InvalidOperationException(string.Format(
-                    "RightEye off must hide only the simulated right eye (right {0} px, left {1} px).", hiddenPixels, visiblePixels));
-            }
-            effectMaterial.SetFloat(OverlayVisibilityProperty + "_RightEye", 1f);
-            effectMaterial.SetFloat(OverlayVisibilityProperty + "_LeftEye", 0f);
-            hiddenPixels = CountEffectPixels(0f, head);
-            visiblePixels = CountEffectPixels(1f, head);
-            if (hiddenPixels != 0 || visiblePixels == 0)
-            {
-                throw new System.InvalidOperationException(string.Format(
-                    "LeftEye off must hide only the simulated left eye (left {0} px, right {1} px).", hiddenPixels, visiblePixels));
-            }
-            effectMaterial.SetFloat(OverlayVisibilityProperty + "_LeftEye", 1f);
-            hiddenPixels = CountEffectPixels(0f, head + Vector3.up * 100f);
-            if (hiddenPixels != 0)
-            {
-                throw new System.InvalidOperationException(string.Format(
-                    "A head center beyond _MaxRange must cut the simulated effect ({0} px).", hiddenPixels));
-            }
-
-            simulatedMirror = true;
-            SetShaderContext(true, 1f, camera, head);
-            var offInMirror = Shader.GetGlobalFloat(SimulatedVrId) == 0f;
-            simulatedMirror = false;
-            simulatedPersonalMirror = true;
-            SetShaderContext(true, 1f, camera, head);
-            var offInPersonalMirror = Shader.GetGlobalFloat(SimulatedVrId) == 0f;
-            simulatedPersonalMirror = false;
-            simulatedCameraMode = 1;
-            SetShaderContext(true, 1f, camera, head);
-            var offInHandCamera = Shader.GetGlobalFloat(SimulatedVrId) == 0f;
-            simulatedCameraMode = 3;
-            SetShaderContext(true, 1f, camera, head);
-            var offInPhoto = Shader.GetGlobalFloat(SimulatedVrId) == 0f;
-            simulatedCameraMode = 0;
-            if (!offInMirror || !offInPersonalMirror || !offInHandCamera || !offInPhoto)
-            {
-                throw new System.InvalidOperationException(
-                    "The VR simulation must stay off in mirrors, personal mirrors, hand cameras and photos.");
-            }
-
-            if (!CaptureSceneViewVr()
-                || Shader.GetGlobalFloat(SimulatedVrId) != 1f
-                || Shader.GetGlobalFloat(SimulatedEyeIndexId) != 1f
-                || Vector3.Distance(Shader.GetGlobalVector(SimulatedCameraCenterId), sceneViewCamera.transform.position) > 0.001f)
-            {
-                throw new System.InvalidOperationException(
-                    "The stereo preview must simulate each eye around the Scene View head position.");
-            }
-        }
-        finally
-        {
-            ShaderUtil.allowAsyncCompilation = previousAsyncCompilation;
-            previousContext.Restore();
-            DestroyHiddenObject(camera.gameObject);
-            DestroyHiddenObject(effectObject);
-            DestroyHiddenObject(mesh);
-            DestroyHiddenObject(effectMaterial);
-            DestroyRenderTexture(baseline);
-            DestroyRenderTexture(result);
-        }
-        if (!previousContext.IsCurrent())
-        {
-            throw new System.InvalidOperationException("The VR simulation globals were not restored after capture.");
-        }
-    }
-
-    private void CaptureAutomatedFrames()
-    {
-        var previousContext = new ShaderContextState();
-        List<SavedLayer> savedLayers = null;
-        try
-        {
-            if (!CaptureSceneViewVr())
-            {
-                throw new System.InvalidOperationException("A Scene View camera is required to validate the VR preview.");
-            }
-            AssertRenderedTexture(leftSceneVrImage, 0f, "left Scene View VR");
-            AssertRenderedTexture(rightSceneVrImage, 0f, "right Scene View VR");
-            if (CountPixelDifferences(leftSceneVrImage, rightSceneVrImage) == 0)
-            {
-                throw new System.InvalidOperationException("The Scene View VR preview did not produce distinct left and right eye images.");
-            }
-            var sceneViewPosition = sceneViewCamera.transform.position;
-            var averageEyePosition = (leftSceneVrCamera.transform.position + rightSceneVrCamera.transform.position) * 0.5f;
-            if (Vector3.Distance(sceneViewPosition, averageEyePosition) > 0.001f
-                || Mathf.Abs(
-                    Vector3.Distance(leftSceneVrCamera.transform.position, rightSceneVrCamera.transform.position)
-                    - eyeSeparationMeters) > 0.001f
-                || Quaternion.Angle(leftSceneVrCamera.transform.rotation, sceneViewCamera.transform.rotation) > 0.001f
-                || Quaternion.Angle(rightSceneVrCamera.transform.rotation, sceneViewCamera.transform.rotation) > 0.001f
-                || !Mathf.Approximately(leftSceneVrCamera.fieldOfView, verticalFov)
-                || !Mathf.Approximately(rightSceneVrCamera.fieldOfView, verticalFov)
-                || !Mathf.Approximately(
-                    leftSceneVrCamera.aspect,
-                    leftSceneVrImage.width / (float)leftSceneVrImage.height)
-                || !Mathf.Approximately(
-                    rightSceneVrCamera.aspect,
-                    rightSceneVrImage.width / (float)rightSceneVrImage.height))
-            {
-                throw new System.InvalidOperationException(
-                    "The stereo preview must track only the Scene View pose while using the debugger FOV, aspect, and IPD.");
-            }
-
-            var targetLayer = FindUnusedLayer();
-            savedLayers = MoveTargetToLayer(targetLayer);
-            var targetLayerMask = 1 << targetLayer;
-            if (targetObject.layer != targetLayer)
-            {
-                throw new System.InvalidOperationException(
-                    "The shader target was not moved to the temporary isolated render layer.");
-            }
-            foreach (var station in stations)
-            {
-                SetDepthLightActive(station, station.Index > 0);
-                SetShaderContext(simulatedVr, simulatedEyeIndex, station.Camera, station.Camera.transform.position);
-                var expectedShaderMask = station.Index == 0 ? targetLayerMask : ~0;
-                if (station.Index == 0)
-                {
-                    station.BackgroundCamera.cullingMask = ~targetLayerMask;
-                    station.BackgroundCamera.clearFlags = CameraClearFlags.Skybox;
-                }
-                station.Camera.cullingMask = expectedShaderMask;
-                var depthTextureMode = station.Camera.depthTextureMode;
-                var hasDepthTexture = (depthTextureMode & DepthTextureMode.Depth) != 0;
-                if (station.Index == 0 && depthTextureMode != DepthTextureMode.None)
-                {
-                    throw new System.InvalidOperationException(
-                        "The no-depth reference camera must not request any camera depth texture mode.");
-                }
-                if (station.Index > 0 && !hasDepthTexture)
-                {
-                    throw new System.InvalidOperationException("A distance camera is missing the depth texture required by the shader.");
-                }
-                if (station.Camera.cullingMask != expectedShaderMask
-                    || (station.Index == 0 && (station.BackgroundCamera.cullingMask & targetLayerMask) != 0))
-                {
-                    throw new System.InvalidOperationException(
-                        "The reference and depth-enabled cameras are not using their expected render masks.");
-                }
-                if (station.DepthLight.color != Color.black
-                    || !Mathf.Approximately(station.DepthLight.intensity, 0.01f)
-                    || station.DepthLight.shadows != LightShadows.Hard
-                    || station.DepthLight.lightmapBakeType != LightmapBakeType.Baked)
-                {
-                    throw new System.InvalidOperationException("DepthLight must be black, intensity 0.01, Hard shadows, and Baked.");
-                }
-                if (station.Index == 0)
-                {
-                    station.BackgroundCamera.Render();
-                    station.Camera.clearFlags = CameraClearFlags.Depth;
-                }
-                else
-                {
-                    station.Camera.clearFlags = CameraClearFlags.Skybox;
-                }
-                station.Camera.Render();
-                AssertRenderedTexture(station.Image, station.Distance, "mono");
-                if (station.Index == 0 && station.DepthLight.gameObject.activeSelf)
-                {
-                    throw new System.InvalidOperationException("Reference camera unexpectedly activated the DepthLight GameObject.");
-                }
-                if (station.Index > 0 && !station.DepthLight.gameObject.activeSelf)
-                {
-                    throw new System.InvalidOperationException("A non-reference camera did not activate its DepthLight GameObject.");
-                }
-                SetDepthLightActive(station, false);
-            }
-
-            if (stations[1].Distance - stations[0].Distance < 0.99f)
-            {
-                throw new System.InvalidOperationException("Camera stations are not spaced one meter apart.");
-            }
-            foreach (var station in stations)
-            {
-                var actualDistance = Vector3.Distance(station.Camera.transform.position, targetObject.transform.position);
-                if (Mathf.Abs(actualDistance - station.Distance) > 0.001f)
-                {
-                    throw new System.InvalidOperationException(
-                        string.Format(
-                            "The {0} m camera station is actually {1:0.####} m from the shader object.",
-                            station.Distance,
-                            actualDistance));
-                }
-            }
-        }
-        finally
-        {
-            if (savedLayers != null)
-            {
-                RestoreLayers(savedLayers);
-            }
-            previousContext.Restore();
-            foreach (var station in stations)
-            {
-                SetDepthLightActive(station, false);
-            }
-        }
-        if (!previousContext.IsCurrent())
-        {
-            throw new System.InvalidOperationException("The shader simulation globals were not restored after camera capture.");
-        }
-        foreach (var savedLayer in savedLayers)
-        {
-            if (savedLayer.Object != null && savedLayer.Object.layer != savedLayer.Layer)
-            {
-                throw new System.InvalidOperationException(
-                    "The target object's original render layer was not restored after capture.");
-            }
-        }
-    }
-
-    private static void AssertRenderedTexture(RenderTexture renderTexture, float distance, string eye)
-    {
-        if (renderTexture == null || !renderTexture.IsCreated())
-        {
-            throw new System.InvalidOperationException(
-                string.Format("Unity did not create the {0} eye image at {1} m.", eye, distance));
-        }
-
-        var previous = RenderTexture.active;
-        var pixels = new Texture2D(renderTexture.width, renderTexture.height, TextureFormat.RGB24, false);
-        try
-        {
-            RenderTexture.active = renderTexture;
-            pixels.ReadPixels(new Rect(0f, 0f, renderTexture.width, renderTexture.height), 0, 0);
-            pixels.Apply();
-            var colors = pixels.GetPixels32();
-            var first = colors[0];
-            var hasVariation = false;
-            for (var index = 1; index < colors.Length; index++)
-            {
-                if (colors[index].r != first.r || colors[index].g != first.g || colors[index].b != first.b)
-                {
-                    hasVariation = true;
-                    break;
-                }
-            }
-            if (!hasVariation)
-            {
-                throw new System.InvalidOperationException(
-                    string.Format("The {0} eye image at {1} m is blank or has no scene detail.", eye, distance));
-            }
-        }
-        finally
-        {
-            RenderTexture.active = previous;
-            DestroyImmediate(pixels);
-        }
-    }
-
-    private static int CountPixelDifferences(RenderTexture left, RenderTexture right)
-    {
-        var previous = RenderTexture.active;
-        var leftPixels = new Texture2D(left.width, left.height, TextureFormat.RGB24, false);
-        var rightPixels = new Texture2D(right.width, right.height, TextureFormat.RGB24, false);
-        try
-        {
-            RenderTexture.active = left;
-            leftPixels.ReadPixels(new Rect(0f, 0f, left.width, left.height), 0, 0);
-            leftPixels.Apply();
-
-            RenderTexture.active = right;
-            rightPixels.ReadPixels(new Rect(0f, 0f, right.width, right.height), 0, 0);
-            rightPixels.Apply();
-
-            var leftColors = leftPixels.GetPixels32();
-            var rightColors = rightPixels.GetPixels32();
-            var differences = 0;
-            for (var index = 0; index < leftColors.Length; index++)
-            {
-                if (leftColors[index].r != rightColors[index].r
-                    || leftColors[index].g != rightColors[index].g
-                    || leftColors[index].b != rightColors[index].b)
-                {
-                    differences++;
-                }
-            }
-            return differences;
-        }
-        finally
-        {
-            RenderTexture.active = previous;
-            DestroyImmediate(leftPixels);
-            DestroyImmediate(rightPixels);
-        }
-    }
-
-    private static int CountSideBySidePixelDifferences(RenderTexture image)
-    {
-        if (image.width % 2 != 0)
-        {
-            throw new System.InvalidOperationException("A side-by-side stereo image must have an even pixel width.");
-        }
-
-        var previous = RenderTexture.active;
-        var pixels = new Texture2D(image.width, image.height, TextureFormat.RGB24, false);
-        try
-        {
-            RenderTexture.active = image;
-            pixels.ReadPixels(new Rect(0f, 0f, image.width, image.height), 0, 0);
-            pixels.Apply();
-
-            var colors = pixels.GetPixels32();
-            var halfWidth = image.width / 2;
-            var differences = 0;
-            var leftFirst = colors[0];
-            var rightFirst = colors[halfWidth];
-            var leftHasDetail = false;
-            var rightHasDetail = false;
-            for (var y = 0; y < image.height; y++)
-            {
-                var rowStart = y * image.width;
-                for (var x = 0; x < halfWidth; x++)
-                {
-                    var left = colors[rowStart + x];
-                    var right = colors[rowStart + x + halfWidth];
-                    leftHasDetail |= left.r != leftFirst.r || left.g != leftFirst.g || left.b != leftFirst.b;
-                    rightHasDetail |= right.r != rightFirst.r || right.g != rightFirst.g || right.b != rightFirst.b;
-                    if (left.r != right.r || left.g != right.g || left.b != right.b)
-                    {
-                        differences++;
-                    }
-                }
-            }
-            if (!leftHasDetail || !rightHasDetail)
-            {
-                throw new System.InvalidOperationException(
-                    "Both eyes in the IF pimax side-by-side image must contain rendered scene detail.");
-            }
-            return differences;
-        }
-        finally
-        {
-            RenderTexture.active = previous;
-            DestroyImmediate(pixels);
         }
     }
 }

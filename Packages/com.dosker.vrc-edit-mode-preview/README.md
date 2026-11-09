@@ -92,10 +92,6 @@ dos ossos que podem ser pegos, que continuam visíveis durante a simulação.
 - **Atualizações do SDK:** a janela avisa quando um campo usado não existe mais.
 - **Preferências:** ficam em `UserSettings/VrcEditModePreview.json`.
 
-**Tools > Dosker Tools > Validar Edit-Mode Preview** confere os cálculos e os
-campos do SDK e registra `VRC_PREVIEW_VALIDATION_OK` no Console. O mesmo teste
-roda com `-executeMethod VrcEditModePreviewWindow.RunAutomatedValidation`.
-
 É uma visualização: rede, permissões entre jogadores, parâmetros de animator e
 colisão com as mãos de outros jogadores só existem no Play mode ou no cliente.
 Confirme os valores finais lá.

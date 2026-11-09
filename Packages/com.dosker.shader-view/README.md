@@ -86,8 +86,8 @@ Companion e instale este pacote no projeto.
   que leem algo como AudioLink ou Light Volumes.
 - O cartão **Alvo** lista as globais do VRChat citadas no arquivo do shader.
   Includes não entram nessa lista.
-- **Usar a seleção como alvo** aceita qualquer objeto. Só a cena de teste e a
-  validação dependem do `ScreenSpace Ubershader_D`.
+- **Usar a seleção como alvo** aceita qualquer objeto. Só a cena de teste
+  depende do `ScreenSpace Ubershader_D`.
 - A barra do topo mostra o tempo e a memória da última captura.
 - A aba **Estéreo** tem faixas de FOV aproximadas, que não representam um modelo
   específico de headset.
@@ -151,23 +151,3 @@ antes de desenhar o alvo. O script restaura as layers originais após capturar.
 As demais câmeras continuam vendo o mundo completo. A DepthLight é uma luz
 separada e não produz a depth texture. O modo **Baked** configura a luz como
 solicitado, mas não executa um novo bake de lightmaps.
-
-## Validação automatizada
-
-A validação precisa do shader e do VRChat SDK. Crie a cena de teste uma vez pelo menu e rode com o
-Unity fechado para esse projeto:
-
-```powershell
-& 'F:\Unity\2022.3.22f1\Editor\Unity.exe' `
-  -batchmode -projectPath 'C:\caminho\do\projeto' `
-  -executeMethod ShaderViewVrDebuggerWindow.RunAutomatedValidation `
-  -logFile shader-view-validation.log
-```
-
-O teste verifica o `GrabPass` e as variáveis de simulação, renderiza a prévia
-estéreo da Scene View, a imagem lado a lado da aba **Estéreo** e dez câmeras
-mono em intervalos de 1 m; valida conteúdo/paralaxe, isolamento e configurações
-da DepthLight. Também verifica a captura automática em ritmo nativo, a rotação
-das câmeras em 360° e a simulação de VR: filtros por olho, corte por `_MaxRange`
-com o centro da cabeça, contextos em que ela fica desligada e restauração das
-variáveis. O sucesso registra `SHADERVIEW_VALIDATION_OK` no log.

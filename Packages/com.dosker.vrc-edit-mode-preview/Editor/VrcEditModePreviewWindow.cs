@@ -7,19 +7,19 @@ using DoskerTools.EditorUi;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using static DoskerTools.EditorUi.DoskerLocale;
 using Object = UnityEngine.Object;
 
 // Visualiza componentes do VRChat SDK fora do Play mode: PhysBones (com simulação
 // temporária), colliders, contacts (com cálculo de colisão/proximidade) e constraints.
 // O SDK é acessado por reflexão, então o script compila mesmo sem o SDK no projeto.
-public sealed class VrcEditModePreviewWindow : EditorWindow
+public sealed partial class VrcEditModePreviewWindow : EditorWindow
 {
     private const float SimulationStep = 1f / 60f;
     private const int MaxParticlesPerChain = 256;
     private const int GrabSolverIterations = 8;
     private const string PrefsFile = "VrcEditModePreview";
     private const float ImpulseStrength = 0.6f;
-    private const string ValidationOk = "VRC_PREVIEW_VALIDATION_OK";
     private const float CalibrationNudge = 0.3f;
     private const float FullTurn = Mathf.PI * 2f;
     private const float BodyNudgeDegrees = 10f;
@@ -40,14 +40,24 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     private static readonly string[] SpineMuscles = { "Spine Front-Back", "Chest Front-Back", "UpperChest Front-Back" };
     private static readonly string[] NeckMuscles = { "Neck Nod Down-Up", "Head Nod Down-Up" };
     private static readonly string[] Fingers = { "Thumb", "Index", "Middle", "Ring", "Little" };
-    private static readonly string[] TestMotionLabels =
-    {
-        "Nenhuma",
-        "Movimento/Parado", "Movimento/Andar", "Movimento/Correr", "Movimento/Agachado", "Movimento/Andar agachado", "Movimento/Sentado", "Movimento/Pular",
-        "Poses/T-pose", "Poses/A-pose",
-        "Pernas/Levantar joelhos", "Pernas/Calcanhar para trás", "Pernas/Levantar perna esticada", "Pernas/Agachamento", "Pernas/Abrir as pernas",
-        "Tronco e braços/Erguer os braços", "Tronco e braços/Abraçar o corpo", "Tronco e braços/Torcer o tronco", "Tronco e braços/Inclinar para os lados", "Tronco e braços/Olhar em volta",
-    };
+    // A ordem segue o enum TestMotion. É propriedade para seguir o idioma escolhido.
+    private static string[] TestMotionLabels => IsPortuguese
+        ? new[]
+        {
+            "Nenhuma",
+            "Movimento/Parado", "Movimento/Andar", "Movimento/Correr", "Movimento/Agachado", "Movimento/Andar agachado", "Movimento/Sentado", "Movimento/Pular",
+            "Poses/T-pose", "Poses/A-pose",
+            "Pernas/Levantar joelhos", "Pernas/Calcanhar para trás", "Pernas/Levantar perna esticada", "Pernas/Agachamento", "Pernas/Abrir as pernas",
+            "Tronco e braços/Erguer os braços", "Tronco e braços/Abraçar o corpo", "Tronco e braços/Torcer o tronco", "Tronco e braços/Inclinar para os lados", "Tronco e braços/Olhar em volta",
+        }
+        : new[]
+        {
+            "None",
+            "Movement/Idle", "Movement/Walk", "Movement/Run", "Movement/Crouch", "Movement/Crouch walk", "Movement/Sit", "Movement/Jump",
+            "Poses/T-pose", "Poses/A-pose",
+            "Legs/High knees", "Legs/Heel kicks", "Legs/Straight leg raise", "Legs/Squat", "Legs/Leg spread",
+            "Torso and arms/Raise arms", "Torso and arms/Hug body", "Torso and arms/Twist torso", "Torso and arms/Side bend", "Torso and arms/Look around",
+        };
 
     // Colliders do Avatar Descriptor que viram senders no cliente; a mesma tabela do Gesture Manager.
     private static readonly (HumanBodyBones Bone, string Field, string[] Tags)[] AvatarColliders =
@@ -494,7 +504,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             instance = RequiredField(managerType, "Inst");
             if (instance.GetValue(null) as Object != null)
             {
-                throw new InvalidOperationException("já existe um PhysBoneManager ativo.");
+                throw new InvalidOperationException(Tr("já existe um PhysBoneManager ativo.", "a PhysBoneManager is already active."));
             }
 
             var chainIdType = FindType("VRC.Dynamics.ChainId");
@@ -650,7 +660,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             }
             catch (Exception exception)
             {
-                Debug.LogWarning("VRC preview: erro ao parar o solver do SDK: " + (exception.InnerException ?? exception).Message);
+                Debug.LogWarning(Tr("VRC preview: erro ao parar o solver do SDK: ", "VRC preview: error stopping the SDK solver: ") + (exception.InnerException ?? exception).Message);
             }
             finally
             {
@@ -660,12 +670,6 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 instance?.SetValue(null, null);
             }
         }
-    }
-
-    [MenuItem("Tools/Dosker Tools/Validar Edit-Mode Preview")]
-    private static void RunValidationFromMenu()
-    {
-        RunAutomatedValidation();
     }
 
     [MenuItem("Tools/Dosker Tools/VRChat Edit-Mode Preview")]
@@ -879,7 +883,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         if (EditorApplication.isPlaying)
         {
             EditorGUILayout.HelpBox(
-                "Em Play mode o próprio SDK executa PhysBones, contacts e constraints. Esta janela atua somente no Edit mode.",
+                Tr("Em Play mode o próprio SDK executa PhysBones, contacts e constraints. Esta janela atua somente no Edit mode.", "In Play mode the SDK itself runs PhysBones, contacts and constraints. This window only works in Edit mode."),
                 MessageType.Info);
             return;
         }
@@ -887,9 +891,9 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         if (!SdkAvailable)
         {
             EditorGUILayout.HelpBox(
-                "VRChat SDK não encontrado neste projeto. Instale com.vrchat.base (e avatars/worlds) pelo VCC para usar esta janela.",
+                Tr("VRChat SDK não encontrado neste projeto. Instale com.vrchat.base (e avatars/worlds) pelo VCC para usar esta janela.", "VRChat SDK not found in this project. Install com.vrchat.base (and avatars/worlds) through the VCC to use this window."),
                 MessageType.Warning);
-            if (GUILayout.Button("Procurar novamente"))
+            if (GUILayout.Button(Tr("Procurar novamente", "Search again")))
             {
                 ResolveTypes();
                 componentsDirty = true;
@@ -929,12 +933,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     {
         if (simulatePhysBones && sdkFailure != null)
         {
-            DoskerEditorUi.Banner("Solver do SDK indisponível, usando o aproximado: " + sdkFailure, DoskerEditorUi.BannerKind.Warning);
+            DoskerEditorUi.Banner(Tr("Solver do SDK indisponível, usando o aproximado: ", "SDK solver unavailable, using the approximate one: ") + sdkFailure, DoskerEditorUi.BannerKind.Warning);
         }
         if (MissingFields.Count > 0)
         {
             DoskerEditorUi.Banner(
-                "Esta versão do SDK não tem: " + string.Join(", ", MissingFields.OrderBy(name => name)) + ". O que depende disso fica sem efeito.",
+                Tr("Esta versão do SDK não tem: ", "This SDK version doesn't have: ") + string.Join(", ", MissingFields.OrderBy(name => name))
+                + Tr(". O que depende disso fica sem efeito.", ". Whatever depends on it has no effect."),
                 DoskerEditorUi.BannerKind.Warning);
         }
     }
@@ -945,7 +950,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                var simulateLabel = simulatePhysBones ? "Parar simulação" : "Simular PhysBones";
+                var simulateLabel = simulatePhysBones ? Tr("Parar simulação", "Stop simulation") : Tr("Simular PhysBones", "Simulate PhysBones");
                 var simulateIcon = simulatePhysBones ? "PauseButton" : "PlayButton";
                 var simulateColor = simulatePhysBones ? DoskerEditorUi.Red : DoskerEditorUi.Green;
                 if (DoskerEditorUi.PrimaryButton(simulateLabel, simulateIcon, simulateColor, 30f, GUILayout.ExpandWidth(true)))
@@ -954,7 +959,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 }
                 using (new EditorGUI.DisabledScope(!simulatePhysBones))
                 {
-                    if (DoskerEditorUi.IconButton("Refresh", "↻", "Reiniciar a simulação"))
+                    if (DoskerEditorUi.IconButton("Refresh", "↻", Tr("Reiniciar a simulação", "Restart the simulation")))
                     {
                         RestartSimulation();
                     }
@@ -966,35 +971,35 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             {
                 // Sem foco o Editor não avança Time, e o solver do SDK para junto.
                 var paused = sdkSolver != null && !UnityEditorInternal.InternalEditorUtility.isApplicationActive;
-                var solverLabel = sdkSolver == null ? "Aproximada" : paused ? "SDK · pausada sem foco" : "SDK";
-                var status = !simulatePhysBones ? "Desligada" : lockMode ? solverLabel + " · Bloqueio" : solverLabel;
+                var solverLabel = sdkSolver == null ? Tr("Aproximada", "Approximate") : paused ? Tr("SDK · pausada sem foco", "SDK · paused without focus") : "SDK";
+                var status = !simulatePhysBones ? Tr("Desligada", "Off") : lockMode ? solverLabel + Tr(" · Bloqueio", " · Lock") : solverLabel;
                 var statusColor = simulatePhysBones ? DoskerEditorUi.Green : DoskerEditorUi.Neutral;
                 DoskerEditorUi.StatusPill(status, statusColor, 22f);
                 using (new EditorGUI.DisabledScope(!simulatePhysBones))
                 {
                     lockMode = DoskerEditorUi.ChipToggle(
                         lockMode,
-                        "Bloqueio",
+                        Tr("Bloqueio", "Lock"),
                         lockMode ? "LockIcon-On" : "LockIcon",
                         DoskerEditorUi.Yellow,
-                        "Ao soltar o mouse, o objeto movido na Scene View volta ao estado original.");
+                        Tr("Ao soltar o mouse, o objeto movido na Scene View volta ao estado original.", "When you release the mouse, the object moved in the Scene View returns to its original state."));
                     allowGrab = DoskerEditorUi.ChipToggle(
                         allowGrab,
-                        "Arrastar",
+                        Tr("Arrastar", "Drag"),
                         "ViewToolMove",
                         DoskerEditorUi.Cyan,
-                        "Arrastar ossos na Scene View, como no Play mode. Com o botão esquerdo pressionado, o direito posa.");
+                        Tr("Arrastar ossos na Scene View, como no Play mode. Com o botão esquerdo pressionado, o direito posa.", "Drag bones in the Scene View, as in Play mode. While holding the left button, the right one poses."));
                     poseOnRelease = DoskerEditorUi.ChipToggle(
                         poseOnRelease,
-                        "Posar",
+                        Tr("Posar", "Pose"),
                         "AvatarPivot",
                         DoskerEditorUi.Purple,
-                        "Ao soltar, o osso mantém a pose, se Allow Posing estiver ligado. Clique em Reiniciar para soltar.");
+                        Tr("Ao soltar, o osso mantém a pose, se Allow Posing estiver ligado. Clique em Reiniciar para soltar.", "On release, the bone keeps the pose if Allow Posing is on. Click Restart to let go."));
                     using (new EditorGUI.DisabledScope(sdkSolver != null))
                     {
                         var tooltip = sdkSolver != null
-                            ? "Sacudir só funciona no solver aproximado."
-                            : "Sacudir: dá o mesmo impulso a todas as cadeias, para comparar ajustes.";
+                            ? Tr("Sacudir só funciona no solver aproximado.", "Shake only works with the approximate solver.")
+                            : Tr("Sacudir: dá o mesmo impulso a todas as cadeias, para comparar ajustes.", "Shake: gives every chain the same push, to compare settings.");
                         if (DoskerEditorUi.IconButton("PreMatCube", "↯", tooltip, 22f))
                         {
                             ApplyImpulse();
@@ -1006,7 +1011,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             EditorGUILayout.Space(4f);
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Animação de teste", GUILayout.Width(110f));
+                EditorGUILayout.LabelField(Tr("Animação de teste", "Test animation"), GUILayout.Width(110f));
                 var nextMotion = (TestMotion)EditorGUILayout.Popup((int)testMotion, TestMotionLabels);
                 if (nextMotion != testMotion)
                 {
@@ -1060,9 +1065,9 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             {
                 return;
             }
-            showPhysBoneLimits = EditorGUILayout.ToggleLeft("Limites de ângulo", showPhysBoneLimits);
+            showPhysBoneLimits = EditorGUILayout.ToggleLeft(Tr("Limites de ângulo", "Angle limits"), showPhysBoneLimits);
             var nextFollow = EditorGUILayout.ToggleLeft(
-                new GUIContent("Seguir Armature Link do VRCFury", "Na simulação, os ossos ligados da roupa acompanham o avatar, como depois do build."),
+                new GUIContent(Tr("Seguir Armature Link do VRCFury", "Follow VRCFury Armature Link"), Tr("Na simulação, os ossos ligados da roupa acompanham o avatar, como depois do build.", "During the simulation, the linked clothing bones follow the avatar, as after the build.")),
                 followArmatureLinks);
             if (nextFollow != followArmatureLinks)
             {
@@ -1074,7 +1079,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             }
             if (linkedBones.Count > 0)
             {
-                EditorGUILayout.LabelField(string.Format("{0} ossos ligados por Armature Link", linkedBones.Count), EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(string.Format(Tr("{0} ossos ligados por Armature Link", "{0} bones linked by Armature Link"), linkedBones.Count), EditorStyles.miniLabel);
             }
             EditorGUILayout.LabelField(
                 string.Format("≈ {0} transforms · {1} colliders · {2} collision checks", physBoneTransforms, physBoneColliderLinks, physBoneCollisionChecks),
@@ -1106,7 +1111,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             }
             if (colliders.Count == 0)
             {
-                EditorGUILayout.LabelField("Nenhum PhysBone Collider nesta cena.", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(Tr("Nenhum PhysBone Collider nesta cena.", "No PhysBone Colliders in this scene."), EditorStyles.miniLabel);
                 return;
             }
             foreach (var collider in colliders.Where(collider => collider != null && MatchesSearch(collider.name)))
@@ -1120,10 +1125,10 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     {
         var kind = EnumField(collider, "shapeType");
         var size = kind == 2
-            ? "Plano"
+            ? Tr("Plano", "Plane")
             : kind == 1
-                ? string.Format("Cápsula · r {0:0.###} · h {1:0.###}", Field(collider, "radius", 0f), Field(collider, "height", 0f))
-                : string.Format("Esfera · r {0:0.###}", Field(collider, "radius", 0f));
+                ? string.Format(Tr("Cápsula · r {0:0.###} · h {1:0.###}", "Capsule · r {0:0.###} · h {1:0.###}"), Field(collider, "radius", 0f), Field(collider, "height", 0f))
+                : string.Format(Tr("Esfera · r {0:0.###}", "Sphere · r {0:0.###}"), Field(collider, "radius", 0f));
         colliderUses.TryGetValue(collider, out var use);
         var label = string.Format(
             "{0}{1}{2} · {3}",
@@ -1146,31 +1151,31 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     {
         if (use == null)
         {
-            return "sem uso";
+            return Tr("sem uso", "unused");
         }
         if (use.Active.Count == 0)
         {
-            return string.Format("só em {0} PhysBone(s) desativado(s)", use.Disabled.Count);
+            return string.Format(Tr("só em {0} PhysBone(s) desativado(s)", "only in {0} disabled PhysBone(s)"), use.Disabled.Count);
         }
         return use.Disabled.Count == 0
             ? string.Format("{0} PhysBone(s)", use.Active.Count)
-            : string.Format("{0} PhysBone(s) · {1} desativado(s)", use.Active.Count, use.Disabled.Count);
+            : string.Format(Tr("{0} PhysBone(s) · {1} desativado(s)", "{0} PhysBone(s) · {1} disabled"), use.Active.Count, use.Disabled.Count);
     }
 
     private static string ColliderUseTooltip(ColliderUse use)
     {
         if (use == null)
         {
-            return "Nenhum PhysBone da cena usa este collider. Objetos com a tag EditorOnly não contam.";
+            return Tr("Nenhum PhysBone da cena usa este collider. Objetos com a tag EditorOnly não contam.", "No PhysBone in the scene uses this collider. Objects tagged EditorOnly don't count.");
         }
         var lines = new List<string>();
         if (use.Active.Count > 0)
         {
-            lines.Add("Ativos: " + string.Join(", ", use.Active));
+            lines.Add(Tr("Ativos: ", "Active: ") + string.Join(", ", use.Active));
         }
         if (use.Disabled.Count > 0)
         {
-            lines.Add("Desativados: " + string.Join(", ", use.Disabled));
+            lines.Add(Tr("Desativados: ", "Disabled: ") + string.Join(", ", use.Disabled));
         }
         return string.Join("\n", lines);
     }
@@ -1189,7 +1194,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             {
                 return;
             }
-            var nextLiveContacts = EditorGUILayout.ToggleLeft("Calcular colisões de contacts", liveContacts);
+            var nextLiveContacts = EditorGUILayout.ToggleLeft(Tr("Calcular colisões de contacts", "Compute contact collisions"), liveContacts);
             using (new EditorGUI.DisabledScope(!nextLiveContacts))
             using (new EditorGUI.IndentLevelScope())
             {
@@ -1200,14 +1205,14 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 }
                 writeMaterialContacts = nextWrite;
                 avatarColliderContacts = EditorGUILayout.ToggleLeft(
-                    new GUIContent("Colliders do avatar", "Head, Torso, Hand, Foot e Finger do Avatar Descriptor atuam como senders, como no Gesture Manager."),
+                    new GUIContent(Tr("Colliders do avatar", "Avatar colliders"), Tr("Head, Torso, Hand, Foot e Finger do Avatar Descriptor atuam como senders, como no Gesture Manager.", "The Avatar Descriptor's Head, Torso, Hand, Foot and Finger act as senders, as in Gesture Manager.")),
                     avatarColliderContacts);
                 touchContacts = EditorGUILayout.ToggleLeft(
-                    new GUIContent("Tocar com o mouse", "Na Scene View, segure o botão esquerdo sobre um receiver para acioná-lo. Não afeta Material Contacts."),
+                    new GUIContent(Tr("Tocar com o mouse", "Touch with the mouse"), Tr("Na Scene View, segure o botão esquerdo sobre um receiver para acioná-lo. Não afeta Material Contacts.", "In the Scene View, hold the left button over a receiver to trigger it. Doesn't affect Material Contacts.")),
                     touchContacts);
                 using (new EditorGUI.DisabledScope(!touchContacts))
                 {
-                    touchTag = EditorGUILayout.TextField(new GUIContent("Tag", "Deixe vazio para ignorar as tags."), touchTag);
+                    touchTag = EditorGUILayout.TextField(new GUIContent("Tag", Tr("Deixe vazio para ignorar as tags.", "Leave empty to ignore tags.")), touchTag);
                 }
             }
             if (nextLiveContacts != liveContacts && !nextLiveContacts)
@@ -1240,7 +1245,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             if (card.Expanded)
             {
-                showConstraintGhosts = EditorGUILayout.ToggleLeft("Pose resolvida (fantasma)", showConstraintGhosts);
+                showConstraintGhosts = EditorGUILayout.ToggleLeft(Tr("Pose resolvida (fantasma)", "Solved pose (ghost)"), showConstraintGhosts);
             }
         }
     }
@@ -1262,7 +1267,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             sent.TryGetValue(tag, out var senderCount);
             heard.TryGetValue(tag, out var receiverCount);
-            var warning = senderCount == 0 || receiverCount == 0 ? " · sem par na cena" : string.Empty;
+            var warning = senderCount == 0 || receiverCount == 0 ? Tr(" · sem par na cena", " · no match in the scene") : string.Empty;
             EditorGUILayout.LabelField(string.Format("{0}: {1} senders → {2} receivers{3}", tag, senderCount, receiverCount, warning), EditorStyles.miniLabel);
         }
     }
@@ -1285,7 +1290,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     {
         using (var card = new DoskerEditorUi.CardScope(
             "Vrc.Lint",
-            "Verificar configuração",
+            Tr("Verificar configuração", "Check setup"),
             "console.warnicon.sml",
             DoskerEditorUi.Yellow,
             lintDone ? lintResults.Count.ToString() : null,
@@ -1295,13 +1300,13 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             {
                 return;
             }
-            if (GUILayout.Button("Verificar agora"))
+            if (GUILayout.Button(Tr("Verificar agora", "Check now")))
             {
                 RunLint();
             }
             if (lintDone && lintResults.Count == 0)
             {
-                EditorGUILayout.LabelField("Nenhum problema encontrado.", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(Tr("Nenhum problema encontrado.", "No problems found."), EditorStyles.miniLabel);
             }
             foreach (var result in lintResults)
             {
@@ -1321,17 +1326,17 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             var root = RootOf(bone);
             if (root.childCount == 0 && Field(bone, "endpointPosition", Vector3.zero) == Vector3.zero)
             {
-                lintResults.Add(string.Format("PhysBone {0}: a raiz não tem filhos nem Endpoint Position, então nada se move.", bone.name));
+                lintResults.Add(string.Format(Tr("PhysBone {0}: a raiz não tem filhos nem Endpoint Position, então nada se move.", "PhysBone {0}: the root has no children and no Endpoint Position, so nothing moves."), bone.name));
             }
             if (Field<List<Transform>>(bone, "ignoreTransforms")?.Any(item => item == null) == true)
             {
-                lintResults.Add(string.Format("PhysBone {0}: Ignore Transforms tem um item vazio.", bone.name));
+                lintResults.Add(string.Format(Tr("PhysBone {0}: Ignore Transforms tem um item vazio.", "PhysBone {0}: Ignore Transforms has an empty item."), bone.name));
             }
             foreach (var transform in root.GetComponentsInChildren<Transform>(true))
             {
                 if (claimed.TryGetValue(transform, out var other) && other != bone)
                 {
-                    lintResults.Add(string.Format("PhysBones {0} e {1} controlam o mesmo osso ({2}).", other.name, bone.name, transform.name));
+                    lintResults.Add(string.Format(Tr("PhysBones {0} e {1} controlam o mesmo osso ({2}).", "PhysBones {0} and {1} control the same bone ({2})."), other.name, bone.name, transform.name));
                     break;
                 }
                 claimed[transform] = bone;
@@ -1346,7 +1351,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             {
                 if (!(item is Component collider) || collider == null)
                 {
-                    lintResults.Add(string.Format("PhysBone {0}: a lista de colliders tem um item vazio.", bone.name));
+                    lintResults.Add(string.Format(Tr("PhysBone {0}: a lista de colliders tem um item vazio.", "PhysBone {0}: the colliders list has an empty item."), bone.name));
                 }
             }
         }
@@ -1355,11 +1360,11 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             colliderUses.TryGetValue(collider, out var use);
             if (use == null)
             {
-                lintResults.Add(string.Format("Collider {0}: nenhum PhysBone o usa.", collider.name));
+                lintResults.Add(string.Format(Tr("Collider {0}: nenhum PhysBone o usa.", "Collider {0}: no PhysBone uses it."), collider.name));
             }
             else if (use.Active.Count == 0)
             {
-                lintResults.Add(string.Format("Collider {0}: só é usado por PhysBones desativados ({1}).", collider.name, string.Join(", ", use.Disabled)));
+                lintResults.Add(string.Format(Tr("Collider {0}: só é usado por PhysBones desativados ({1}).", "Collider {0}: only used by disabled PhysBones ({1})."), collider.name, string.Join(", ", use.Disabled)));
             }
         }
         LintConstraints();
@@ -1373,11 +1378,11 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             var sources = ReadSources(constraint);
             if (sources.Count == 0)
             {
-                lintResults.Add(string.Format("Constraint {0}: nenhuma fonte definida.", constraint.name));
+                lintResults.Add(string.Format(Tr("Constraint {0}: nenhuma fonte definida.", "Constraint {0}: no sources set."), constraint.name));
             }
             else if (sources.Sum(source => source.Weight) <= 0f)
             {
-                lintResults.Add(string.Format("Constraint {0}: todas as fontes têm peso zero.", constraint.name));
+                lintResults.Add(string.Format(Tr("Constraint {0}: todas as fontes têm peso zero.", "Constraint {0}: every source has zero weight."), constraint.name));
             }
 
             var target = Field<Transform>(constraint, "TargetTransform");
@@ -1393,7 +1398,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
                 var current = pending.Pop();
                 if (current == start)
                 {
-                    lintResults.Add(string.Format("Constraints formam um ciclo em {0}.", start.name));
+                    lintResults.Add(string.Format(Tr("Constraints formam um ciclo em {0}.", "Constraints form a cycle at {0}."), start.name));
                     break;
                 }
                 if (seen.Add(current) && dependsOn.TryGetValue(current, out var next))
@@ -1408,7 +1413,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
     {
         using (var card = new DoskerEditorUi.CardScope(
             "Vrc.Display",
-            "Opções de exibição",
+            Tr("Opções de exibição", "Display options"),
             "SettingsIcon",
             DoskerEditorUi.Neutral,
             defaultExpanded: false))
@@ -1417,17 +1422,23 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             {
                 return;
             }
-            showLabels = EditorGUILayout.ToggleLeft("Rótulos", showLabels);
-            drawThroughGeometry = EditorGUILayout.ToggleLeft("Desenhar através da geometria", drawThroughGeometry);
-            onlySelection = EditorGUILayout.ToggleLeft("Somente a hierarquia selecionada", onlySelection);
-            handleOpacity = EditorGUILayout.Slider("Opacidade", handleOpacity, 0.1f, 1f);
+            showLabels = EditorGUILayout.ToggleLeft(Tr("Rótulos", "Labels"), showLabels);
+            drawThroughGeometry = EditorGUILayout.ToggleLeft(Tr("Desenhar através da geometria", "Draw through geometry"), drawThroughGeometry);
+            onlySelection = EditorGUILayout.ToggleLeft(Tr("Somente a hierarquia selecionada", "Only the selected hierarchy"), onlySelection);
+            handleOpacity = EditorGUILayout.Slider(Tr("Opacidade", "Opacity"), handleOpacity, 0.1f, 1f);
             EditorGUILayout.HelpBox(
-                "Os desenhos seguem o botão Gizmos da Scene View; os pontos dos ossos continuam visíveis. " +
-                "A simulação move os ossos das cadeias apenas enquanto está ativa e restaura a pose original ao desligar, " +
-                "salvar a cena, recompilar ou entrar no Play mode. Arraste um osso na Scene View para pegá-lo; com o botão " +
-                "esquerdo pressionado, o direito posa. Com Bloqueio ativo, o objeto movido volta ao estado original ao soltar o mouse. " +
-                "O status mostra o solver em uso: SDK roda o PhysBoneManager do VRChat SDK e pausa quando o Unity perde o foco; " +
-                "Aproximada é a reserva, usada se o SDK não puder iniciar. Confirme os valores finais no Play mode ou no cliente.",
+                Tr("Os desenhos seguem o botão Gizmos da Scene View; os pontos dos ossos continuam visíveis. " +
+                   "A simulação move os ossos das cadeias apenas enquanto está ativa e restaura a pose original ao desligar, " +
+                   "salvar a cena, recompilar ou entrar no Play mode. Arraste um osso na Scene View para pegá-lo; com o botão " +
+                   "esquerdo pressionado, o direito posa. Com Bloqueio ativo, o objeto movido volta ao estado original ao soltar o mouse. " +
+                   "O status mostra o solver em uso: SDK roda o PhysBoneManager do VRChat SDK e pausa quando o Unity perde o foco; " +
+                   "Aproximada é a reserva, usada se o SDK não puder iniciar. Confirme os valores finais no Play mode ou no cliente.",
+                   "The drawings follow the Scene View Gizmos button; the bone points stay visible. " +
+                   "The simulation moves the chain bones only while it is on, and restores the original pose when turned off, " +
+                   "when saving the scene, recompiling or entering Play mode. Drag a bone in the Scene View to grab it; while holding " +
+                   "the left button, the right one poses. With Lock on, the moved object returns to its original state when you release the mouse. " +
+                   "The status shows the solver in use: SDK runs the VRChat SDK PhysBoneManager and pauses when Unity loses focus; " +
+                   "Approximate is the fallback, used if the SDK can't start. Confirm the final values in Play mode or in the client."),
                 MessageType.None);
         }
     }
@@ -1453,7 +1464,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             var value = state != null ? state.Value : 0f;
             var label = string.Format(
                 "{0} · {1} = {2:0.00}",
-                string.IsNullOrEmpty(parameter) ? "(sem parâmetro)" : parameter,
+                string.IsNullOrEmpty(parameter) ? Tr("(sem parâmetro)", "(no parameter)") : parameter,
                 typeLabel,
                 value);
             var active = state != null && state.Colliding;
@@ -1529,11 +1540,11 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         {
             var message = state.WrittenRenderers > 0
                 ? string.Format(
-                    "    Shader: _VRChatContact_*_{0} → {1} renderer(s) · {2} alvo(s)",
+                    Tr("    Shader: _VRChatContact_*_{0} → {1} renderer(s) · {2} alvo(s)", "    Shader: _VRChatContact_*_{0} → {1} renderer(s) · {2} target(s)"),
                     state.ShaderName,
                     state.WrittenRenderers,
                     Mathf.Min(state.Hits.Count, MaxShaderTargets))
-                : "    Write to Shaders ativo, mas nenhum renderer foi definido no receiver.";
+                : Tr("    Write to Shaders ativo, mas nenhum renderer foi definido no receiver.", "    Write to Shaders is on, but the receiver has no renderers set.");
             EditorGUILayout.LabelField(message, EditorStyles.miniLabel);
         }
     }
@@ -1555,7 +1566,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
             var rect = GUILayoutUtility.GetRect(60f, EditorGUIUtility.singleLineHeight, GUILayout.ExpandWidth(true));
             var label = string.Format(
                 "{0}_Angle = {1:0.00} · _Stretch = {2:0.00} · _Squish = {3:0.00}{4}{5}",
-                string.IsNullOrEmpty(parameter) ? "(sem parâmetro)" : parameter,
+                string.IsNullOrEmpty(parameter) ? Tr("(sem parâmetro)", "(no parameter)") : parameter,
                 chain.Angle,
                 chain.Stretch,
                 chain.Squish,
@@ -3912,93 +3923,6 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         ApplyRotations(chain);
     }
 
-    // Sem o SDK ou o Unity gráfico não há como ver o arraste, mas a matemática e a restauração podem ser conferidas.
-    public static void RunAutomatedValidation()
-    {
-        var failures = new List<string>();
-        void Check(string name, bool passed)
-        {
-            if (!passed)
-            {
-                failures.Add(name);
-            }
-        }
-
-        Vector3 CheckLength(float distance, float shortest, float longest)
-        {
-            var position = new Vector3(distance, 0f, 0f);
-            ConstrainLength(Vector3.zero, ref position, shortest, longest);
-            return position;
-        }
-        Check("length keeps values inside the range", Mathf.Approximately(CheckLength(1f, 0.5f, 2f).x, 1f));
-        Check("length clamps to the longest", Mathf.Approximately(CheckLength(3f, 0.5f, 2f).x, 2f));
-        Check("length clamps to the shortest", Mathf.Approximately(CheckLength(0.1f, 0.5f, 2f).x, 0.5f));
-
-        var limited = ApplyLimit(1, new Vector3(1f, 0f, 1f), Vector3.forward, Quaternion.identity, 10f, 10f);
-        Check("angle limit", Mathf.Abs(Vector3.Angle(limited, Vector3.forward) - 10f) < 0.1f);
-
-        var outside = new Vector3(0.5f, 0f, 0f);
-        PushOutOfCollider(new Shape { Kind = 0, Center = Vector3.zero, Rotation = Quaternion.identity, Radius = 1f }, ref outside, 0.1f);
-        Check("collider push", Mathf.Abs(outside.magnitude - 1.1f) < 0.001f);
-
-        var sphere = new Shape { Kind = 0, Center = new Vector3(0.5f, 0.05f, 0f), A = new Vector3(0.5f, 0.05f, 0f), B = new Vector3(0.5f, 0.05f, 0f), Rotation = Quaternion.identity, Radius = 0.1f };
-        var tip = new Vector3(1f, 0f, 0f);
-        PushBoneOutOfCollider(sphere, Vector3.zero, ref tip, 0f);
-        ClosestSegmentPoints(Vector3.zero, tip, sphere.A, sphere.B, out var onBone, out var onSphere);
-        Check("a collider between two bones pushes the bone", tip.y < 0f && Vector3.Distance(onBone, onSphere) > 0.09f);
-        sphere.BonesAsSpheres = true;
-        var untouched = new Vector3(1f, 0f, 0f);
-        PushBoneOutOfCollider(sphere, Vector3.zero, ref untouched, 0f);
-        Check("Bones As Sphere only tests the bone position", untouched == new Vector3(1f, 0f, 0f));
-
-        Chain Branches(int multiChild)
-        {
-            var chain = new Chain();
-            chain.Particles.Add(new Particle { Parent = -1 });
-            chain.Particles.Add(new Particle { Parent = 0 });
-            chain.Particles.Add(new Particle { Parent = 0 });
-            chain.Particles[0].Children.Add(1);
-            chain.Particles[0].Children.Add(2);
-            ApplyMultiChild(chain, multiChild);
-            return chain;
-        }
-        var ignore = Branches(0);
-        Check("Multi-Child Ignore keeps the root still", ignore.RootStill && ignore.Particles[1].Pinned && ignore.Particles[2].Pinned);
-        var firstChild = Branches(1);
-        Check("Multi-Child First continues the first child", !firstChild.RootStill && !firstChild.Particles[1].Pinned && firstChild.Particles[2].Pinned);
-        var average = Branches(2);
-        Check("Multi-Child Average keeps every child", !average.RootStill && !average.Particles[1].Pinned && !average.Particles[2].Pinned);
-
-        Check("ray proximity", TryRayProximity(new Ray(new Vector3(0f, 0f, -1f), Vector3.forward), new Shape { Kind = 0, Radius = 0.5f, Rotation = Quaternion.identity }, out var rayProximity, out _) && Mathf.Approximately(rayProximity, 1f));
-
-        var curve = new BoneCurve(null, "pull", "pullCurve") { Value = 2f, Curve = AnimationCurve.Linear(0f, 0f, 1f, 1f) };
-        Check("curves multiply the value", Mathf.Approximately(curve.At(0.5f), 1f));
-
-        foreach (var muscle in SpineMuscles.Concat(NeckMuscles).Concat(new[] { "Left Shoulder Front-Back", "Left Hand Down-Up", "Chest Twist Left-Right", "UpperChest Twist Left-Right", "Spine Twist Left-Right", "Neck Turn Left-Right", "Left Upper Leg Front-Back", "Right Lower Leg Stretch", "Left Foot Up-Down", "Left Arm Down-Up", "Left Arm Front-Back", "Right Forearm Stretch" }))
-        {
-            Check("Muscle " + muscle, MuscleIndex(muscle) >= 0);
-        }
-
-        ResolveTypes();
-        Check("SDK types resolve", physBoneType != null && contactType != null && constraintType != null);
-        foreach (var field in new[] { "immobileType", "integrationType", "maxStretch", "maxStretchCurve", "maxSquish", "maxSquishCurve", "stretchMotion", "stretchMotionCurve", "allowPosing", "multiChildType", "ignoreOtherPhysBones", "grabMovement", "grabFilter", "poseFilter", "chainId" })
-        {
-            Check("PhysBone field " + field, physBoneType == null || GetField(physBoneType, field) != null);
-        }
-        Check("Collider field bonesAsSpheres", colliderType == null || GetField(colliderType, "bonesAsSpheres") != null);
-        foreach (var (_, field, _) in AvatarColliders)
-        {
-            Check("Descriptor field " + field, avatarDescriptorType == null || GetField(avatarDescriptorType, field) != null);
-        }
-
-        if (failures.Count > 0)
-        {
-            Debug.LogError("VRC preview validation failed: " + string.Join("; ", failures));
-            return;
-        }
-        Debug.Log(ValidationOk);
-    }
-
     private static Vector3 ApplyLimit(int limitType, Vector3 direction, Vector3 limitDirection, Quaternion frame, float maxX, float maxZ)
     {
         if (limitType == 2)
@@ -4249,7 +4173,7 @@ public sealed class VrcEditModePreviewWindow : EditorWindow
         }
 
         var tags = Field<List<string>>(contact, "collisionTags");
-        var text = tags != null && tags.Count > 0 ? string.Join(", ", tags) : "(sem tags)";
+        var text = tags != null && tags.Count > 0 ? string.Join(", ", tags) : Tr("(sem tags)", "(no tags)");
         if (state != null)
         {
             var parameter = Field<string>(contact, "parameter");

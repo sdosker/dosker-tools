@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
+using static DoskerTools.EditorUi.DoskerLocale;
 using ControlType = VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu.Control.ControlType;
 using ParamType = VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters.ValueType;
 
@@ -82,36 +83,36 @@ namespace CompressorExclusions {
         public static Verdict Evaluate(CompressorExclusionSettings settings, string name, ParamType type, int control, string menuPath = "") {
             var choice = settings.GetChoice(name);
             if (!settings.active) {
-                return new Verdict(false, "Exceções desligadas: segue o VRCFury", choice);
+                return new Verdict(false, Tr("Exceções desligadas: segue o VRCFury", "Exclusions off: follows VRCFury"), choice);
             }
             if (choice == ParamChoice.Protect) {
-                return new Verdict(true, "Protegido por escolha individual", choice);
+                return new Verdict(true, Tr("Protegido por escolha individual", "Protected by an individual choice"), choice);
             }
             if (choice == ParamChoice.Compress) {
-                return new Verdict(false, "Liberado por escolha individual", choice);
+                return new Verdict(false, Tr("Liberado por escolha individual", "Released by an individual choice"), choice);
             }
 
             var matches = new List<string>();
-            if (type == ParamType.Bool && settings.protectBool) matches.Add("Protegido pela regra Bool");
-            if (type == ParamType.Int && settings.protectInt) matches.Add("Protegido pela regra Int");
-            if (type == ParamType.Float && settings.protectFloat) matches.Add("Protegido pela regra Float");
+            if (type == ParamType.Bool && settings.protectBool) matches.Add(Tr("Protegido pela regra Bool", "Protected by the Bool rule"));
+            if (type == ParamType.Int && settings.protectInt) matches.Add(Tr("Protegido pela regra Int", "Protected by the Int rule"));
+            if (type == ParamType.Float && settings.protectFloat) matches.Add(Tr("Protegido pela regra Float", "Protected by the Float rule"));
             if (control != NoControl && settings.protectedControls.Contains((ControlType)control)) {
-                matches.Add($"Protegido pela regra {ControlLabel(control)}");
+                matches.Add(Tr($"Protegido pela regra {ControlLabel(control)}", $"Protected by the {ControlLabel(control)} rule"));
             }
             foreach (var pattern in settings.namePatterns.Where(p => !IsNegated(p))) {
-                if (MatchesPattern(pattern, name, menuPath)) matches.Add($"Protegido pelo padrão \"{pattern.Trim()}\"");
+                if (MatchesPattern(pattern, name, menuPath)) matches.Add(Tr($"Protegido pelo padrão \"{pattern.Trim()}\"", $"Protected by the pattern \"{pattern.Trim()}\""));
             }
 
             var details = string.Join("\n", matches);
             foreach (var pattern in settings.namePatterns.Where(IsNegated)) {
                 if (MatchesPattern(pattern, name, menuPath)) {
-                    var reason = $"Liberado pelo padrão \"{pattern.Trim()}\"";
+                    var reason = Tr($"Liberado pelo padrão \"{pattern.Trim()}\"", $"Released by the pattern \"{pattern.Trim()}\"");
                     return new Verdict(false, reason, choice, matches.Count == 0 ? reason : reason + "\n" + details);
                 }
             }
             return matches.Count > 0
                 ? new Verdict(true, matches[0], choice, details)
-                : new Verdict(false, "Pode ser comprimido", choice);
+                : new Verdict(false, Tr("Pode ser comprimido", "Can be compressed"), choice);
         }
 
         public static bool CanCompress(SnapshotParam param) {
@@ -215,11 +216,11 @@ namespace CompressorExclusions {
             switch ((ControlType)control) {
                 case ControlType.Toggle: return "Toggle";
                 case ControlType.RadialPuppet: return "Radial";
-                case ControlType.TwoAxisPuppet: return "2 eixos";
-                case ControlType.FourAxisPuppet: return "4 eixos";
-                case ControlType.Button: return "Botão";
+                case ControlType.TwoAxisPuppet: return Tr("2 eixos", "2 axes");
+                case ControlType.FourAxisPuppet: return Tr("4 eixos", "4 axes");
+                case ControlType.Button: return Tr("Botão", "Button");
                 case ControlType.SubMenu: return "Submenu";
-                default: return "Fora do menu";
+                default: return Tr("Fora do menu", "Not in menu");
             }
         }
 

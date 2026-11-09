@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
+using static DoskerTools.EditorUi.DoskerLocale;
 using ParamType = VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters.ValueType;
 
 namespace CompressorExclusions {
@@ -53,14 +54,14 @@ namespace CompressorExclusions {
 
             CompressorUi.ApplyStyles(root);
 
-            var headerLabel = new Label("Compressão");
+            var headerLabel = new Label(Tr("Compressão", "Compression"));
             headerLabel.AddToClassList("ce-inspector-header");
-            headerLabel.tooltip = "Clique no botão de cada parâmetro para alternar entre Auto, Proteger e Comprimir.";
+            headerLabel.tooltip = Tr("Clique no botão de cada parâmetro para alternar entre Auto, Proteger e Comprimir.", "Click each parameter's button to cycle between Auto, Protect and Compress.");
             header.Add(headerLabel);
 
             toolbar.Add(new ToolbarButton(CompressorExclusionsWindow.Open) {
-                text = "Abrir configuração",
-                tooltip = "Abre a configuração de compressão do VRCFury"
+                text = Tr("Abrir configuração", "Open settings"),
+                tooltip = Tr("Abre a configuração de compressão do VRCFury", "Opens the VRCFury compression settings")
             });
 
             var originalBind = list.bindItem;
@@ -108,11 +109,11 @@ namespace CompressorExclusions {
                     var verdict = CompressorPolicy.Evaluate(settings, paramName, (ParamType)typeField.value, control, known?.menuPath ?? "");
                     text = CompressorUi.ChoiceLabel(verdict.choice);
                     tooltip = verdict.details + (known == null ? "" : LastBuildText(known))
-                              + "\nClique para alternar: Auto, Proteger, Comprimir.";
+                              + "\n" + Tr("Clique para alternar: Auto, Proteger, Comprimir.", "Click to cycle: Auto, Protect, Compress.");
                     style = verdict.isProtected ? "ce-chip--protected" : "ce-chip--open";
                 } else {
                     text = "—";
-                    tooltip = "Parâmetros não sincronizados não passam pelo compressor.";
+                    tooltip = Tr("Parâmetros não sincronizados não passam pelo compressor.", "Unsynced parameters don't go through the compressor.");
                     style = "ce-chip--off";
                 }
 
@@ -134,7 +135,8 @@ namespace CompressorExclusions {
 
         private static string LastBuildText(SnapshotParam param) {
             var bits = param.cost > 0 ? param.cost : CompressorPolicy.CostOf((ParamType)param.valueType);
-            return $"\nÚltimo build: {bits} bits, {(param.compressed ? "comprimido" : "sincronizando direto")}.";
+            return Tr($"\nÚltimo build: {bits} bits, {(param.compressed ? "comprimido" : "sincronizando direto")}.",
+                      $"\nLast build: {bits} bits, {(param.compressed ? "compressed" : "syncing directly")}.");
         }
 
         private static ParamChoice NextChoice(ParamChoice choice) {

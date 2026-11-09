@@ -3,6 +3,19 @@
 Todas as mudanças relevantes deste pacote ficam neste arquivo. O formato segue o
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.8.0] - 2026-11-09
+
+### Adicionado
+
+- Menu **Tools > Dosker Tools > Language** e página **Preferences > Dosker Tools** para escolher o idioma de todos os pacotes de uma vez.
+- `DoskerEditorUi.LanguageButton`, botão com o globo e a sigla do idioma, e `DoskerLocale.ShowMenu`.
+- `DoskerLocale.Changed`, avisado quando o idioma muda. Todas as janelas são redesenhadas na hora.
+
+### Alterado
+
+- Os idiomas aparecem com o nome no próprio idioma (English, Português), para quem não lê o idioma atual achar o seu.
+- `DoskerLanguage` passou a ter nomes em inglês: `Automatic`, `Portuguese` e `English`. A escolha salva continua valendo.
+
 ## [0.7.0] - 2026-11-01
 
 ### Adicionado

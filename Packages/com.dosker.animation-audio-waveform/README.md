@@ -46,11 +46,6 @@ VRChat SDK já inclui essa biblioteca em `com.vrchat.base`; não adicione outra
 cópia sem necessidade. Sem Harmony, o menu abre uma janela separada com o mesmo
 conteúdo, que se alinha à timeline quando encaixada abaixo da janela Animation.
 
-**Tools > Dosker Tools > Validar Animation Audio** cria objetos temporários e
-registra `ANIMATION_AUDIO_VALIDATION_OK` no Console. O teste compara o ponto de
-ativação calculado com o estado real amostrado pelo Unity e toca duas fontes ao
-mesmo tempo. Feche o preview da janela Animation antes de executar.
-
 ## Instalar
 
 Adicione o listing do [Dosker Tools](https://sdosker.github.io/dosker-tools/) ao VRChat Creator

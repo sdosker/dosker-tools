@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
+using static DoskerTools.EditorUi.DoskerLocale;
 using ControlType = VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu.Control.ControlType;
 using ParamType = VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters.ValueType;
 
@@ -53,28 +54,33 @@ namespace CompressorExclusions {
             public Label count;
         }
 
-        private static readonly (ControlType type, string label)[] ControlRules = {
+        // Lists with text are properties so they follow the language picked in DoskerLocale
+        private static (ControlType type, string label)[] ControlRules => new[] {
             (ControlType.Toggle, "Toggle"),
             (ControlType.RadialPuppet, "Radial"),
-            (ControlType.TwoAxisPuppet, "Puppet 2 eixos"),
-            (ControlType.FourAxisPuppet, "Puppet 4 eixos"),
+            (ControlType.TwoAxisPuppet, Tr("Puppet 2 eixos", "Two Axis Puppet")),
+            (ControlType.FourAxisPuppet, Tr("Puppet 4 eixos", "Four Axis Puppet")),
         };
 
         private const int ForecastColumns = 3;
         private const int MaxNamesInTooltip = 30;
         private const int HistoryRows = 10;
         private const float TightRatio = 0.9f;
-        private const string SceneSuffix = " (cena)";
+        private static string SceneSuffix => Tr(" (cena)", " (scene)");
 
-        private static readonly string[] ForecastRows = { "Comprimidos", "Protegidos", "Bits", "Lotes", "Atraso", "Cabe" };
+        private const int ForecastRowCount = 6;
+
+        private static string[] ForecastRows => new[] {
+            Tr("Comprimidos", "Compressed"), Tr("Protegidos", "Protected"), "Bits", Tr("Lotes", "Batches"), Tr("Atraso", "Delay"), Tr("Cabe", "Fits")
+        };
 
         private static readonly ParamChoice[] Choices = { ParamChoice.Auto, ParamChoice.Protect, ParamChoice.Compress };
 
-        private static readonly (Filter filter, string label)[] Filters = {
-            (Filter.All, "Todos"),
-            (Filter.Compressed, "Comprimidos"),
-            (Filter.Protected, "Protegidos"),
-            (Filter.Unavailable, "Sem compressão"),
+        private static (Filter filter, string label)[] Filters => new[] {
+            (Filter.All, Tr("Todos", "All")),
+            (Filter.Compressed, Tr("Comprimidos", "Compressed")),
+            (Filter.Protected, Tr("Protegidos", "Protected")),
+            (Filter.Unavailable, Tr("Sem compressão", "Not compressed")),
         };
 
         private Toggle activeToggle;
@@ -126,11 +132,24 @@ namespace CompressorExclusions {
         private void OnEnable() {
             CompressorExclusionSettings.Changed += Refresh;
             CompressorSnapshotStore.Updated += OnSnapshotUpdated;
+            DoskerTools.EditorUi.DoskerLocale.Changed += RebuildGUI;
         }
 
         private void OnDisable() {
             CompressorExclusionSettings.Changed -= Refresh;
             CompressorSnapshotStore.Updated -= OnSnapshotUpdated;
+            DoskerTools.EditorUi.DoskerLocale.Changed -= RebuildGUI;
+        }
+
+        // The UI Toolkit labels keep their text, so a language change rebuilds the window
+        private void RebuildGUI() {
+            if (table == null) return;
+            var search = searchField.value;
+            rootVisualElement.Clear();
+            patternViews.Clear();
+            CreateGUI();
+            searchField.SetValueWithoutNotify(search);
+            ApplyFilter();
         }
 
         private bool ShowsSceneAvatar => selectedAvatar != null && selectedAvatar == sceneAvatarKey;
@@ -174,7 +193,7 @@ namespace CompressorExclusions {
             var header = new VisualElement();
             header.AddToClassList("ce-header");
 
-            var title = new Label("Compressão de parâmetros");
+            var title = new Label(Tr("Compressão de parâmetros", "Parameter compression"));
             title.AddToClassList("ce-title");
             header.Add(title);
 
@@ -190,7 +209,7 @@ namespace CompressorExclusions {
             spacer.AddToClassList("ce-spacer");
             header.Add(spacer);
 
-            avatarDropdown = new DropdownField { tooltip = "Avatar usado para mostrar os parâmetros. As regras valem para o projeto todo." };
+            avatarDropdown = new DropdownField { tooltip = Tr("Avatar usado para mostrar os parâmetros. As regras valem para o projeto todo.", "Avatar used to show the parameters. The rules apply to the whole project.") };
             avatarDropdown.style.minWidth = 140;
             avatarDropdown.RegisterValueChangedCallback(evt => {
                 selectedAvatar = evt.newValue;
@@ -198,14 +217,33 @@ namespace CompressorExclusions {
             });
             header.Add(avatarDropdown);
 
-            activeToggle = new Toggle("Ativo") {
-                tooltip = "Desligado, o VRCFury comprime como faria sem esta ferramenta."
+            activeToggle = new Toggle(Tr("Ativo", "Active")) {
+                tooltip = Tr("Desligado, o VRCFury comprime como faria sem esta ferramenta.", "When off, VRCFury compresses as it would without this tool.")
             };
             activeToggle.labelElement.style.minWidth = 36;
             activeToggle.style.marginLeft = 10;
             activeToggle.RegisterValueChangedCallback(evt =>
                 Settings.Mutate("Toggle Compressor Exclusions", s => s.active = evt.newValue));
             header.Add(activeToggle);
+
+            Button language = null;
+            // A built-in Editor icon, because the UI Toolkit font has no globe character
+            language = new Button(() => ShowMenu(language.worldBound)) {
+                tooltip = "Language / Idioma"
+            };
+            language.Add(new Label(ShortCode) { pickingMode = PickingMode.Ignore });
+            language.style.marginLeft = 6;
+            language.style.flexDirection = FlexDirection.Row;
+            language.style.alignItems = Align.Center;
+            var globe = DoskerTools.EditorUi.DoskerEditorUi.Icon(GlobeIcon);
+            if (globe != null) {
+                var image = new Image { image = globe, pickingMode = PickingMode.Ignore };
+                image.style.width = 16;
+                image.style.height = 16;
+                image.style.marginRight = 3;
+                language.Insert(0, image);
+            }
+            header.Add(language);
             return header;
         }
 
@@ -233,10 +271,10 @@ namespace CompressorExclusions {
 
             var stats = new VisualElement();
             stats.AddToClassList("ce-stats");
-            statCompressed = AddStat(stats, "Comprimidos", "Parâmetros que sincronizam em lotes, com atraso");
-            statProtected = AddStat(stats, "Protegidos", "Parâmetros que seriam elegíveis, mas sincronizam direto");
-            statDelay = AddStat(stats, "Atraso estimado", "Tempo até quem vê o avatar receber uma mudança comprimida");
-            statBuild = AddStat(stats, "Último build", "Resultado real do solver do VRCFury no último build");
+            statCompressed = AddStat(stats, Tr("Comprimidos", "Compressed"), Tr("Parâmetros que sincronizam em lotes, com atraso", "Parameters that sync in batches, with a delay"));
+            statProtected = AddStat(stats, Tr("Protegidos", "Protected"), Tr("Parâmetros que seriam elegíveis, mas sincronizam direto", "Parameters that would be eligible, but sync directly"));
+            statDelay = AddStat(stats, Tr("Atraso estimado", "Estimated delay"), Tr("Tempo até quem vê o avatar receber uma mudança comprimida", "Time until people watching the avatar receive a compressed change"));
+            statBuild = AddStat(stats, Tr("Último build", "Last build"), Tr("Resultado real do solver do VRCFury no último build", "Actual result of the VRCFury solver in the last build"));
             card.Add(stats);
 
             banners = new VisualElement();
@@ -258,16 +296,16 @@ namespace CompressorExclusions {
         }
 
         private VisualElement BuildForecast() {
-            var foldout = new Foldout { text = "Previsão do build", value = true };
+            var foldout = new Foldout { text = Tr("Previsão do build", "Build forecast"), value = true };
             foldout.AddToClassList("ce-rules");
 
             var header = new VisualElement();
             header.AddToClassList("ce-forecast-row");
             foreach (var (title, tip) in new[] {
                 ("", ""),
-                ("Próximo build", "O que a configuração atual deve produzir"),
-                ("Previsto", "O que se esperava do último build, antes de ele rodar"),
-                ("Real", "O que o VRCFury fez no último build"),
+                (Tr("Próximo build", "Next build"), Tr("O que a configuração atual deve produzir", "What the current settings should produce")),
+                (Tr("Previsto", "Predicted"), Tr("O que se esperava do último build, antes de ele rodar", "What was expected from the last build, before it ran")),
+                (Tr("Real", "Actual"), Tr("O que o VRCFury fez no último build", "What VRCFury did in the last build")),
             }) {
                 var label = new Label(title) { tooltip = tip };
                 label.AddToClassList("ce-forecast-cell");
@@ -276,11 +314,12 @@ namespace CompressorExclusions {
             }
             foldout.Add(header);
 
-            forecastCells = new Label[ForecastRows.Length, ForecastColumns];
-            for (var row = 0; row < ForecastRows.Length; row++) {
+            var rowTitles = ForecastRows;
+            forecastCells = new Label[ForecastRowCount, ForecastColumns];
+            for (var row = 0; row < ForecastRowCount; row++) {
                 var line = new VisualElement();
                 line.AddToClassList("ce-forecast-row");
-                var title = new Label(ForecastRows[row]);
+                var title = new Label(rowTitles[row]);
                 title.AddToClassList("ce-forecast-cell");
                 title.AddToClassList("ce-muted");
                 line.Add(title);
@@ -303,7 +342,7 @@ namespace CompressorExclusions {
         }
 
         private VisualElement BuildHistory() {
-            var foldout = new Foldout { text = "Histórico de builds", value = false };
+            var foldout = new Foldout { text = Tr("Histórico de builds", "Build history"), value = false };
             foldout.AddToClassList("ce-rules");
             historyList = new VisualElement();
             foldout.Add(historyList);
@@ -311,16 +350,16 @@ namespace CompressorExclusions {
         }
 
         private VisualElement BuildRules() {
-            var foldout = new Foldout { text = "Regras gerais", value = true };
+            var foldout = new Foldout { text = Tr("Regras gerais", "General rules"), value = true };
             foldout.AddToClassList("ce-rules");
 
-            var types = RuleRow("Proteger todos os");
+            var types = RuleRow(Tr("Proteger todos os", "Protect every"));
             protectBool = RuleToggle(types, "Bool", (s, v) => s.protectBool = v);
             protectInt = RuleToggle(types, "Int", (s, v) => s.protectInt = v);
             protectFloat = RuleToggle(types, "Float", (s, v) => s.protectFloat = v);
             foldout.Add(types);
 
-            var controls = RuleRow("Proteger controles");
+            var controls = RuleRow(Tr("Proteger controles", "Protect controls"));
             controlToggles = new Dictionary<ControlType, Toggle>();
             foreach (var (type, label) in ControlRules) {
                 controlToggles[type] = RuleToggle(controls, label, (s, v) => {
@@ -330,17 +369,19 @@ namespace CompressorExclusions {
             }
             foldout.Add(controls);
 
-            var patterns = RuleRow("Padrões de nome");
-            var hint = new Label("* e ? são curingas. !Fur* libera das regras e menu:Roupas/* usa o caminho no menu");
+            var patterns = RuleRow(Tr("Padrões de nome", "Name patterns"));
+            var hint = new Label(Tr("* e ? são curingas. !Fur* libera das regras e menu:Roupas/* usa o caminho no menu", "* and ? are wildcards. !Fur* releases from the rules and menu:Clothes/* uses the menu path"));
             hint.AddToClassList("ce-muted");
-            hint.tooltip = "Exemplos: Fur*Off protege por nome. !Fur*Off libera esses nomes de todas as regras gerais. "
-                           + "menu:Roupas/* protege o que está no submenu Roupas.";
+            hint.tooltip = Tr("Exemplos: Fur*Off protege por nome. !Fur*Off libera esses nomes de todas as regras gerais. "
+                              + "menu:Roupas/* protege o que está no submenu Roupas.",
+                              "Examples: Fur*Off protects by name. !Fur*Off releases those names from every general rule. "
+                              + "menu:Clothes/* protects what is in the Clothes submenu.");
             patterns.Add(hint);
             var spacer = new VisualElement();
             spacer.AddToClassList("ce-spacer");
             patterns.Add(spacer);
             patterns.Add(new Button(() => Settings.Mutate("Add Name Pattern", s => s.namePatterns.Add(""))) {
-                text = "Adicionar padrão"
+                text = Tr("Adicionar padrão", "Add pattern")
             });
             foldout.Add(patterns);
 
@@ -362,9 +403,12 @@ namespace CompressorExclusions {
 
         private void RemoveOrphans() {
             var orphans = OrphanChoices();
-            var message = "Estas escolhas não aparecem no último build de nenhum avatar. Se existe um avatar que ainda "
-                          + "não passou por um build, as escolhas dele também somem.\n\n" + string.Join(", ", orphans.Take(MaxNamesInTooltip));
-            if (EditorUtility.DisplayDialog("Limpar escolhas", message, "Limpar", "Cancelar")) {
+            var message = Tr("Estas escolhas não aparecem no último build de nenhum avatar. Se existe um avatar que ainda "
+                             + "não passou por um build, as escolhas dele também somem.",
+                             "These choices don't appear in the last build of any avatar. If an avatar hasn't been "
+                             + "built yet, its choices are removed too.")
+                          + "\n\n" + string.Join(", ", orphans.Take(MaxNamesInTooltip));
+            if (EditorUtility.DisplayDialog(Tr("Limpar escolhas", "Clear choices"), message, Tr("Limpar", "Clear"), Tr("Cancelar", "Cancel"))) {
                 Settings.SetChoice(orphans, ParamChoice.Auto);
             }
         }
@@ -406,7 +450,7 @@ namespace CompressorExclusions {
             view.root.Add(view.count);
 
             view.root.Add(new Button(() => Settings.Mutate("Remove Name Pattern", s => s.namePatterns.RemoveAt(index))) {
-                text = "Remover"
+                text = Tr("Remover", "Remove")
             });
             return view;
         }
@@ -460,12 +504,12 @@ namespace CompressorExclusions {
             var header = new VisualElement();
             header.AddToClassList("ce-table-header");
             foreach (var (title, style) in new[] {
-                ("Parâmetro", "ce-col-name"),
-                ("Tipo", "ce-col-type"),
-                ("Controle", "ce-col-control"),
+                (Tr("Parâmetro", "Parameter"), "ce-col-name"),
+                (Tr("Tipo", "Type"), "ce-col-type"),
+                (Tr("Controle", "Control"), "ce-col-control"),
                 ("Bits", "ce-col-bits"),
-                ("Situação", "ce-col-status"),
-                ("Escolha", "ce-col-choice"),
+                (Tr("Situação", "Status"), "ce-col-status"),
+                (Tr("Escolha", "Choice"), "ce-col-choice"),
             }) {
                 var label = new Label(title);
                 label.AddToClassList(style);
@@ -590,7 +634,7 @@ namespace CompressorExclusions {
                 selectedAvatar = avatars.FirstOrDefault();
             }
             avatarDropdown.choices = avatars;
-            avatarDropdown.SetValueWithoutNotify(selectedAvatar ?? "Sem avatar");
+            avatarDropdown.SetValueWithoutNotify(selectedAvatar ?? Tr("Sem avatar", "No avatar"));
             avatarDropdown.SetEnabled(avatars.Count > 1);
         }
 
@@ -642,20 +686,20 @@ namespace CompressorExclusions {
             if (!canCompress) {
                 row.status = RowStatus.Unavailable;
                 row.reason = param.nonStandardEncoding
-                    ? "Codificação especial: o VRCFury não comprime"
+                    ? Tr("Codificação especial: o VRCFury não comprime", "Special encoding: VRCFury doesn't compress it")
                     : param.control == CompressorPolicy.NoControl
-                        ? "Fora do menu: o VRCFury não comprime"
-                        : "O VRCFury não comprime este controle";
+                        ? Tr("Fora do menu: o VRCFury não comprime", "Not in the menu: VRCFury doesn't compress it")
+                        : Tr("O VRCFury não comprime este controle", "VRCFury doesn't compress this control");
             } else if (verdict.isProtected) {
                 row.status = RowStatus.Protected;
                 row.reason = verdict.reason;
             } else if (estimate.compressed.Contains(param.name)) {
                 row.status = RowStatus.Compressed;
-                row.reason = verdict.choice == ParamChoice.Compress ? verdict.reason : "Comprimido";
-                row.reason += $" · lote {estimate.batchOf[param.name] + 1}/{estimate.batches}";
+                row.reason = verdict.choice == ParamChoice.Compress ? verdict.reason : Tr("Comprimido", "Compressed");
+                row.reason += Tr($" · lote {estimate.batchOf[param.name] + 1}/{estimate.batches}", $" · batch {estimate.batchOf[param.name] + 1}/{estimate.batches}");
             } else {
                 row.status = RowStatus.Direct;
-                row.reason = "Sincroniza direto: não precisou comprimir";
+                row.reason = Tr("Sincroniza direto: não precisou comprimir", "Syncs directly: no compression needed");
             }
             row.details = verdict.details == verdict.reason ? row.reason : row.reason + "\n" + verdict.details;
             return row;
@@ -686,13 +730,13 @@ namespace CompressorExclusions {
                     .Select(row => row.displayName)
                     .ToList();
                 var isEmpty = !string.IsNullOrWhiteSpace(pattern) && snapshot != null && matches.Count == 0;
-                view.count.text = string.IsNullOrWhiteSpace(pattern) ? "" : isEmpty ? "Nenhum resultado" : $"{matches.Count} parâmetros";
+                view.count.text = string.IsNullOrWhiteSpace(pattern) ? "" : isEmpty ? Tr("Nenhum resultado", "No matches") : Tr($"{matches.Count} parâmetros", $"{matches.Count} parameters");
                 view.count.tooltip = string.Join("\n", matches.Take(MaxNamesInTooltip));
                 view.count.EnableInClassList("ce-pattern-count--empty", isEmpty);
             }
 
             var orphans = OrphanChoices().Count;
-            orphansButton.text = $"Limpar {orphans} escolhas sem parâmetro";
+            orphansButton.text = Tr($"Limpar {orphans} escolhas sem parâmetro", $"Clear {orphans} choices without a parameter");
             orphansButton.style.display = orphans > 0 ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
@@ -700,7 +744,7 @@ namespace CompressorExclusions {
             var solverError = CompressorExclusionPatch.SolverError;
             var reportingError = CompressorExclusionPatch.ReportingError;
             var style = solverError != null ? "ce-pill--error" : reportingError != null ? "ce-pill--warn" : "ce-pill--ok";
-            statusPill.text = solverError != null ? "Patch com erro" : reportingError != null ? "Patch ativo, com avisos" : "Patch ativo";
+            statusPill.text = solverError != null ? Tr("Patch com erro", "Patch failed") : reportingError != null ? Tr("Patch ativo, com avisos", "Patch active, with warnings") : Tr("Patch ativo", "Patch active");
             statusPill.tooltip = solverError ?? reportingError ?? $"VRCFury {CompressorExclusionPatch.VrcfuryVersion}";
             statusPill.RemoveFromClassList("ce-pill--ok");
             statusPill.RemoveFromClassList("ce-pill--warn");
@@ -715,37 +759,37 @@ namespace CompressorExclusions {
             if (error != null) AddBanner("error", error);
             else if (CompressorExclusionPatch.ReportingError != null) AddBanner("warn", CompressorExclusionPatch.ReportingError);
             if (CompressorExclusionPatch.IsNewerThanTested) {
-                AddBanner("info", $"O VRCFury {CompressorExclusionPatch.VrcfuryVersion} é mais novo que o testado. Confira o último build abaixo.");
+                AddBanner("info", Tr($"O VRCFury {CompressorExclusionPatch.VrcfuryVersion} é mais novo que o testado. Confira o último build abaixo.", $"VRCFury {CompressorExclusionPatch.VrcfuryVersion} is newer than the tested version. Check the last build below."));
             }
 
             if (snapshot == null) {
                 ShowBar(0, CompressorExclusionPatch.MaxCost(), "");
-                barText.text = "Sem dados de build";
+                barText.text = Tr("Sem dados de build", "No build data");
                 ClearStats();
-                AddBanner("info", "Faça um Build & Test do avatar para carregar os parâmetros. As regras acima já podem ser editadas.");
+                AddBanner("info", Tr("Faça um Build & Test do avatar para carregar os parâmetros. As regras acima já podem ser editadas.", "Run a Build & Test of the avatar to load its parameters. The rules above can already be edited."));
                 return;
             }
 
             AddPlatformBanner();
             AddCollisionBanner();
             if (ShowsSceneAvatar) {
-                AddBanner("info", "Este avatar ainda não passou por um build. A lista só tem o que já está no avatar: Toggles do VRCFury e prefabs entram no primeiro Build & Test.");
+                AddBanner("info", Tr("Este avatar ainda não passou por um build. A lista só tem o que já está no avatar: Toggles do VRCFury e prefabs entram no primeiro Build & Test.", "This avatar hasn't been built yet. The list only has what is already on the avatar: VRCFury Toggles and prefabs come in with the first Build & Test."));
             }
 
             if (!snapshot.needsCompression) {
                 var free = snapshot.maxCost - snapshot.originalCost;
                 var used = snapshot.maxCost <= 0 ? 0 : Mathf.RoundToInt(100f * snapshot.originalCost / snapshot.maxCost);
-                ShowBar(snapshot.originalCost, snapshot.maxCost, $"{used}% usado · cabe sem compressão, sobram {free} bits");
+                ShowBar(snapshot.originalCost, snapshot.maxCost, Tr($"{used}% usado · cabe sem compressão, sobram {free} bits", $"{used}% used · fits without compression, {free} bits left"));
                 ClearStats();
                 if (!ShowsSceneAvatar) {
-                    AddBanner("info", "No último build o avatar coube sem compressão, então nada foi comprimido.");
+                    AddBanner("info", Tr("No último build o avatar coube sem compressão, então nada foi comprimido.", "In the last build the avatar fit without compression, so nothing was compressed."));
                 }
                 return;
             }
 
             var hint = estimate.fits
-                ? $"estimativa, antes: {snapshot.originalCost} bits sem compressão"
-                : $"melhor resultado possível com a escolha atual ({snapshot.originalCost} bits sem compressão)";
+                ? Tr($"estimativa, antes: {snapshot.originalCost} bits sem compressão", $"estimate, before: {snapshot.originalCost} bits without compression")
+                : Tr($"melhor resultado possível com a escolha atual ({snapshot.originalCost} bits sem compressão)", $"best possible result with the current choice ({snapshot.originalCost} bits without compression)");
             ShowBar(estimate.finalCost, snapshot.maxCost, hint);
             barFill.EnableInClassList("ce-bar-fill--over", !estimate.fits);
             // The solver fills the limit on purpose, so a full bar here is not a warning
@@ -757,19 +801,21 @@ namespace CompressorExclusions {
                 ? $"{estimate.MinDelay:0.00}–{estimate.MaxDelay:0.00}s"
                 : "—";
             statBuild.text = snapshot.hasResult
-                ? $"{snapshot.resultCompressed} em {snapshot.resultBatches} lotes"
-                : "Sem resultado";
+                ? Tr($"{snapshot.resultCompressed} em {snapshot.resultBatches} lotes", $"{snapshot.resultCompressed} in {snapshot.resultBatches} batches")
+                : Tr("Sem resultado", "No result");
             statBuild.parent.tooltip = $"{snapshot.builtAt}, VRCFury {snapshot.vrcfuryVersion}"
                                        + (snapshot.hasResult ? $", {snapshot.resultCost}/{snapshot.maxCost} bits" : "");
 
             if (!estimate.fits) {
-                AddBanner("error", $"A escolha atual não cabe: precisa de {estimate.finalCost}/{snapshot.maxCost} bits e o VRCFury vai recusar o upload."
-                                   + " Libere parâmetros para compressão, de preferência números, que economizam 8 bits cada.");
+                AddBanner("error", Tr($"A escolha atual não cabe: precisa de {estimate.finalCost}/{snapshot.maxCost} bits e o VRCFury vai recusar o upload."
+                                      + " Libere parâmetros para compressão, de preferência números, que economizam 8 bits cada.",
+                                      $"The current choice doesn't fit: it needs {estimate.finalCost}/{snapshot.maxCost} bits and VRCFury will refuse the upload."
+                                      + " Release parameters for compression, preferably numbers, which save 8 bits each."));
                 AddFitButton();
             }
 
             if (!ShowsSceneAvatar && snapshot.settingsFingerprint != Settings.Fingerprint()) {
-                AddBanner("info", "A configuração mudou desde o último build. Ao enviar, envie PC e depois Quest, para os dois sincronizarem entre si.");
+                AddBanner("info", Tr("A configuração mudou desde o último build. Ao enviar, envie PC e depois Quest, para os dois sincronizarem entre si.", "The settings changed since the last build. When uploading, upload PC and then Quest, so both sync with each other."));
             }
         }
 
@@ -777,17 +823,17 @@ namespace CompressorExclusions {
             CompressorPolicy.Split(Settings, snapshot.parameters, out var candidates, out var protectedParams);
             var release = CompressorEstimator.SuggestRelease(candidates, protectedParams, snapshot.originalCost, snapshot.maxCost);
             if (release == null) {
-                AddBanner("error", "Mesmo liberando tudo, o avatar não cabe. Remova parâmetros.");
+                AddBanner("error", Tr("Mesmo liberando tudo, o avatar não cabe. Remova parâmetros.", "Even releasing everything, the avatar doesn't fit. Remove parameters."));
                 return;
             }
 
             banners.Add(new Button(() => {
                 var names = release.Select(CompressorPolicy.Normalize);
-                var message = "Marcar como Comprimir:\n\n" + string.Join(", ", names.Take(MaxNamesInTooltip));
-                if (EditorUtility.DisplayDialog("Fazer caber", message, "Marcar", "Cancelar")) {
+                var message = Tr("Marcar como Comprimir:", "Mark as Compress:") + "\n\n" + string.Join(", ", names.Take(MaxNamesInTooltip));
+                if (EditorUtility.DisplayDialog(Tr("Fazer caber", "Make it fit"), message, Tr("Marcar", "Mark"), Tr("Cancelar", "Cancel"))) {
                     Settings.SetChoice(release, ParamChoice.Compress);
                 }
-            }) { text = $"Fazer caber: liberar {release.Count} parâmetros" });
+            }) { text = Tr($"Fazer caber: liberar {release.Count} parâmetros", $"Make it fit: release {release.Count} parameters") });
         }
 
         private void AddPlatformBanner() {
@@ -796,16 +842,16 @@ namespace CompressorExclusions {
 
             var compressed = new HashSet<string>(CompressedNames(snapshot));
             if (other.settingsFingerprint != snapshot.settingsFingerprint) {
-                AddBanner("warn", $"Os builds de {snapshot.platform} e {other.platform} usaram configurações diferentes. Envie PC e depois Quest, ou eles não sincronizam.");
+                AddBanner("warn", Tr($"Os builds de {snapshot.platform} e {other.platform} usaram configurações diferentes. Envie PC e depois Quest, ou eles não sincronizam.", $"The {snapshot.platform} and {other.platform} builds used different settings. Upload PC and then Quest, or they won't sync."));
             } else if (snapshot.hasResult && other.hasResult && !compressed.SetEquals(CompressedNames(other))) {
-                AddBanner("warn", $"{snapshot.platform} e {other.platform} comprimiram parâmetros diferentes. Confira se o avatar é igual nas duas versões.");
+                AddBanner("warn", Tr($"{snapshot.platform} e {other.platform} comprimiram parâmetros diferentes. Confira se o avatar é igual nas duas versões.", $"{snapshot.platform} and {other.platform} compressed different parameters. Check that the avatar is the same in both versions."));
             }
         }
 
         private void AddCollisionBanner() {
             var repeated = allRows.GroupBy(row => row.displayName).Where(group => group.Count() > 1).Select(group => group.Key).ToList();
             if (repeated.Count > 0) {
-                AddBanner("info", $"Sem o prefixo do VRCFury, estes nomes se repetem e dividem a mesma escolha: {string.Join(", ", repeated.Take(5))}.");
+                AddBanner("info", Tr("Sem o prefixo do VRCFury, estes nomes se repetem e dividem a mesma escolha: ", "Without the VRCFury prefix, these names repeat and share the same choice: ") + string.Join(", ", repeated.Take(5)) + ".");
             }
         }
 
@@ -828,13 +874,13 @@ namespace CompressorExclusions {
             forecastDiff.text = "";
             forecastDiff.style.display = DisplayStyle.None;
             forecastStatus.text = next.partial
-                ? "Previsão parcial: faltam os parâmetros que o VRCFury só cria no build."
+                ? Tr("Previsão parcial: faltam os parâmetros que o VRCFury só cria no build.", "Partial forecast: the parameters VRCFury only creates during the build are missing.")
                 : ForecastText(next);
         }
 
         private string ForecastText(Prediction next) {
-            if (snapshot == null) return "Sem avatar com parâmetros na cena para prever.";
-            if (!snapshot.hasResult) return "O último build não chegou ao resultado do VRCFury.";
+            if (snapshot == null) return Tr("Sem avatar com parâmetros na cena para prever.", "No avatar with parameters in the scene to forecast.");
+            if (!snapshot.hasResult) return Tr("O último build não chegou ao resultado do VRCFury.", "The last build didn't reach the VRCFury result.");
 
             var report = CompressorEstimator.Compare(
                 snapshot.predictionBefore,
@@ -846,18 +892,18 @@ namespace CompressorExclusions {
             );
 
             var differences = new List<string>();
-            if (report.unexpected.Count > 0) differences.Add($"Comprimiu sem previsão: {string.Join(", ", report.unexpected.Take(MaxNamesInTooltip))}.");
-            if (report.notCompressed.Count > 0) differences.Add($"Previsto, mas não comprimiu: {string.Join(", ", report.notCompressed.Take(MaxNamesInTooltip))}.");
+            if (report.unexpected.Count > 0) differences.Add(Tr("Comprimiu sem previsão: ", "Compressed without being predicted: ") + string.Join(", ", report.unexpected.Take(MaxNamesInTooltip)) + ".");
+            if (report.notCompressed.Count > 0) differences.Add(Tr("Previsto, mas não comprimiu: ", "Predicted, but not compressed: ") + string.Join(", ", report.notCompressed.Take(MaxNamesInTooltip)) + ".");
             forecastDiff.text = string.Join("\n", differences);
             forecastDiff.style.display = differences.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
 
             switch (report.outcome) {
-                case ForecastOutcome.Match: return "A previsão acertou o último build.";
+                case ForecastOutcome.Match: return Tr("A previsão acertou o último build.", "The forecast matched the last build.");
                 case ForecastOutcome.ParametersChanged:
-                    return "Os parâmetros do avatar mudaram desde o build anterior. Com a lista nova, a previsão acertou.";
+                    return Tr("Os parâmetros do avatar mudaram desde o build anterior. Com a lista nova, a previsão acertou.", "The avatar parameters changed since the previous build. With the new list, the forecast matched.");
                 case ForecastOutcome.SolverDiverged:
-                    return "O resultado real difere da previsão. Vale o real: o VRCFury pode ter mudado o solver.";
-                default: return "Este build não tem previsão salva. O próximo terá.";
+                    return Tr("O resultado real difere da previsão. Vale o real: o VRCFury pode ter mudado o solver.", "The actual result differs from the forecast. The actual one is what counts: VRCFury may have changed its solver.");
+                default: return Tr("Este build não tem previsão salva. O próximo terá.", "This build has no saved forecast. The next one will.");
             }
         }
 
@@ -869,25 +915,25 @@ namespace CompressorExclusions {
 
         private void FillColumn(int column, Prediction prediction) {
             if (!prediction.available) {
-                for (var row = 0; row < ForecastRows.Length; row++) forecastCells[row, column].text = "—";
+                for (var row = 0; row < ForecastRowCount; row++) forecastCells[row, column].text = "—";
                 return;
             }
 
-            var delay = prediction.batches > 0 ? $"{prediction.minDelay:0.00}–{prediction.maxDelay:0.00}s" : "Nenhum";
+            var delay = prediction.batches > 0 ? $"{prediction.minDelay:0.00}–{prediction.maxDelay:0.00}s" : Tr("Nenhum", "None");
             var values = new[] {
                 prediction.compressed.ToString(),
                 prediction.protectedCount.ToString(),
                 prediction.cost.ToString(),
                 prediction.batches.ToString(),
                 delay,
-                prediction.fits ? "Sim" : "Não"
+                prediction.fits ? Tr("Sim", "Yes") : Tr("Não", "No")
             };
             for (var row = 0; row < values.Length; row++) forecastCells[row, column].text = values[row];
         }
 
         private void FillRealColumn() {
             if (snapshot == null || !snapshot.hasResult) {
-                for (var row = 0; row < ForecastRows.Length; row++) forecastCells[row, 2].text = "—";
+                for (var row = 0; row < ForecastRowCount; row++) forecastCells[row, 2].text = "—";
                 return;
             }
 
@@ -897,8 +943,8 @@ namespace CompressorExclusions {
                 "—",
                 snapshot.resultCost.ToString(),
                 snapshot.resultBatches.ToString(),
-                snapshot.resultBatches > 0 ? $"{timing.MinDelay:0.00}–{timing.MaxDelay:0.00}s" : "Nenhum",
-                snapshot.resultCost <= snapshot.maxCost ? "Sim" : "Não"
+                snapshot.resultBatches > 0 ? $"{timing.MinDelay:0.00}–{timing.MaxDelay:0.00}s" : Tr("Nenhum", "None"),
+                snapshot.resultCost <= snapshot.maxCost ? Tr("Sim", "Yes") : Tr("Não", "No")
             };
             for (var row = 0; row < values.Length; row++) forecastCells[row, 2].text = values[row];
         }
@@ -907,7 +953,7 @@ namespace CompressorExclusions {
             historyList.Clear();
             var history = snapshot == null ? new List<Snapshot>() : CompressorSnapshotStore.History(snapshot.Key);
             if (history.Count == 0) {
-                var empty = new Label("Nenhum build registrado.");
+                var empty = new Label(Tr("Nenhum build registrado.", "No builds recorded."));
                 empty.AddToClassList("ce-muted");
                 historyList.Add(empty);
                 return;
@@ -915,7 +961,8 @@ namespace CompressorExclusions {
 
             for (var index = 0; index < history.Count && index < HistoryRows; index++) {
                 var entry = history[index];
-                var text = $"{entry.builtAt}: {entry.resultCost}/{entry.maxCost} bits, {entry.resultCompressed} em {entry.resultBatches} lotes";
+                var text = Tr($"{entry.builtAt}: {entry.resultCost}/{entry.maxCost} bits, {entry.resultCompressed} em {entry.resultBatches} lotes",
+                              $"{entry.builtAt}: {entry.resultCost}/{entry.maxCost} bits, {entry.resultCompressed} in {entry.resultBatches} batches");
                 if (index + 1 < history.Count) {
                     var older = new HashSet<string>(CompressedNames(history[index + 1]));
                     var newer = new HashSet<string>(CompressedNames(entry));
@@ -935,7 +982,7 @@ namespace CompressorExclusions {
             barFill.RemoveFromClassList("ce-bar-fill--over");
             // Little room left: one more number parameter or a few bools can push it over
             barFill.EnableInClassList("ce-bar-fill--tight", ratio > TightRatio && ratio <= 1);
-            barFill.parent.tooltip = maxCost <= 0 ? "" : $"{cost} de {maxCost} bits sincronizados ({Mathf.RoundToInt(ratio * 100)}%)";
+            barFill.parent.tooltip = maxCost <= 0 ? "" : Tr($"{cost} de {maxCost} bits sincronizados ({Mathf.RoundToInt(ratio * 100)}%)", $"{cost} of {maxCost} synced bits ({Mathf.RoundToInt(ratio * 100)}%)");
         }
 
         private void ClearStats() {
@@ -966,8 +1013,8 @@ namespace CompressorExclusions {
             table.style.display = hasRows ? DisplayStyle.Flex : DisplayStyle.None;
             emptyLabel.style.display = hasRows ? DisplayStyle.None : DisplayStyle.Flex;
             emptyLabel.text = allRows.Count == 0
-                ? "Abra uma cena com o avatar ou faça um Build & Test para ver os parâmetros."
-                : "Nenhum parâmetro nesta busca ou filtro.";
+                ? Tr("Abra uma cena com o avatar ou faça um Build & Test para ver os parâmetros.", "Open a scene with the avatar or run a Build & Test to see its parameters.")
+                : Tr("Nenhum parâmetro nesta busca ou filtro.", "No parameters match this search or filter.");
             UpdateBulkBar();
         }
 
@@ -987,7 +1034,7 @@ namespace CompressorExclusions {
         private void UpdateBulkBar() {
             var count = table.selectedIndices.Count();
             bulkBar.style.display = count > 1 ? DisplayStyle.Flex : DisplayStyle.None;
-            bulkLabel.text = $"{count} selecionados:";
+            bulkLabel.text = Tr($"{count} selecionados:", $"{count} selected:");
         }
     }
 }

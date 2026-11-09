@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using VRC.SDKBase.Editor.BuildPipeline;
+using static DoskerTools.EditorUi.DoskerLocale;
 
 namespace CompressorExclusions {
     /**
@@ -16,7 +17,7 @@ namespace CompressorExclusions {
             var settingsLoaded = EditorUtility.IsPersistent(settings);
             var error = settingsLoaded
                 ? CompressorExclusionPatch.SolverError
-                : "A configuração ainda não foi carregada. Tente o build de novo em alguns segundos.";
+                : Tr("A configuração ainda não foi carregada. Tente o build de novo em alguns segundos.", "The settings haven't loaded yet. Try the build again in a few seconds.");
             if (error == null) return true;
             if (settingsLoaded && !settings.active) return true;
 
@@ -26,10 +27,11 @@ namespace CompressorExclusions {
 
             return EditorUtility.DisplayDialog(
                 "Compressor Exclusions",
-                "O patch não está ativo, então o VRCFury vai comprimir os parâmetros sem respeitar suas proteções.\n\n"
-                + error,
-                "Continuar mesmo assim",
-                "Cancelar o build"
+                Tr("O patch não está ativo, então o VRCFury vai comprimir os parâmetros sem respeitar suas proteções.",
+                   "The patch isn't active, so VRCFury will compress the parameters without respecting your protections.")
+                + "\n\n" + error,
+                Tr("Continuar mesmo assim", "Continue anyway"),
+                Tr("Cancelar o build", "Cancel the build")
             );
         }
     }

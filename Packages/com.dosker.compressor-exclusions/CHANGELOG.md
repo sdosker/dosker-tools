@@ -10,6 +10,16 @@ Neste projeto, a versão muda assim:
 - **MINOR:** novo recurso compatível com a configuração existente.
 - **PATCH:** correção, incluindo adaptações a novas versões do VRCFury ou do SDK.
 
+## [1.4.0] - 2026-11-09
+
+### Adicionado
+
+- Interface em inglês. O idioma é escolhido uma vez para todos os pacotes do Dosker Tools, em **Tools > Dosker Tools > Language**, em **Preferences > Dosker Tools** ou no botão com o globo. Automático segue o idioma do sistema: fora de português, a interface já abre em inglês.
+
+### Alterado
+
+- Passa a depender de `com.dosker.editor-ui`, que guarda a escolha de idioma.
+
 ## [1.3.0] - 2026-11-08
 
 ### Adicionado

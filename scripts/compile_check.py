@@ -4,7 +4,7 @@ Reads the defines and references from the newest Assembly-CSharp-Editor.rsp in t
 project must have been compiled by Unity at least once. Each package is compiled alone, following the asmdef
 references, which catches a package using something it doesn't declare.
 
-Usage: python scripts/compile_check.py <project> [--unity F:/Unity/2022.3.22f1] [package ...]
+Usage: python scripts/compile_check.py <project> [--unity F:/Unity/2022.3.22f1] [--tests] [package ...]
 """
 import argparse
 import json
@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES_DIR = ROOT / "Packages"
 PACKAGE_PREFIX = "com.dosker."
+TESTS_DIR = ROOT / "tests" / "Unity"
 # The references an asmdef in this repository can't see, because they come from the project
 LOCAL_DEFINES = {"com.vrchat.avatars": "DOSKER_HAS_VRC_AVATARS"}
 
@@ -67,9 +68,12 @@ def compile_order(asmdefs):
     return done
 
 
-def compile_assembly(name, asmdefs, defines, references, unity, output_dir):
+def compile_assembly(name, asmdefs, defines, references, unity, output_dir, with_tests=False):
     path, data = asmdefs[name]
     sources = sorted(path.parent.rglob("*.cs"))
+    if with_tests:
+        # The validation sources compile in the package's own assembly, as sync_to_project.py --tests places them
+        sources += sorted((TESTS_DIR / path.parent.parent.name).glob("*.cs"))
     output = output_dir / f"{name}.dll"
     local = [output_dir / f"{reference}.dll" for reference in data.get("references", []) if reference in asmdefs]
     # Names that this repository also builds must come from this run, not from the project
@@ -99,6 +103,7 @@ def main():
     parser.add_argument("project", type=Path)
     parser.add_argument("packages", nargs="*")
     parser.add_argument("--unity", type=Path, default=Path("F:/Unity/2022.3.22f1"))
+    parser.add_argument("--tests", action="store_true", help="also compile the validation sources in tests/Unity")
     args = parser.parse_args()
 
     defines, references = read_project_options(args.project)
@@ -114,7 +119,7 @@ def main():
         for name in compile_order(asmdefs):
             if name not in wanted and not any(name in asmdefs[other][1].get("references", []) for other in wanted):
                 continue
-            passed &= compile_assembly(name, asmdefs, defines, references, args.unity, output_dir)
+            passed &= compile_assembly(name, asmdefs, defines, references, args.unity, output_dir, args.tests)
     sys.exit(0 if passed else 1)
 
 

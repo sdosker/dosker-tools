@@ -10,9 +10,9 @@ namespace DoskerTools.EditorUi
     {
         private static readonly DoskerEditorUi.TableColumn[] Columns =
         {
-            new DoskerEditorUi.TableColumn("Nome", 3f),
-            new DoskerEditorUi.TableColumn("Valor", 1f),
-            new DoskerEditorUi.TableColumn("Fixa", 1f, false),
+            new DoskerEditorUi.TableColumn("Name", 3f),
+            new DoskerEditorUi.TableColumn("Value", 1f),
+            new DoskerEditorUi.TableColumn("Fixed", 1f, false),
         };
 
         [System.NonSerialized]
@@ -41,27 +41,27 @@ namespace DoskerTools.EditorUi
 
         private void OnGUI()
         {
-            tab = DoskerEditorUi.Tabs(tab, "Estado", "Listas");
+            tab = DoskerEditorUi.Tabs(tab, "State", "Lists");
             search = DoskerEditorUi.Search(ref searchField, search);
 
-            using (new DoskerEditorUi.CardScope("gallery", "Cartão", "Settings", DoskerEditorUi.Cyan, "12", ref eye))
+            using (new DoskerEditorUi.CardScope("gallery", "Card", "Settings", DoskerEditorUi.Cyan, "12", ref eye))
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     DoskerEditorUi.StatusPill("Ok", DoskerEditorUi.Green);
-                    DoskerEditorUi.StatusPill("Aviso", DoskerEditorUi.Yellow);
-                    DoskerEditorUi.StatusPill("Erro", DoskerEditorUi.Red);
-                    DoskerEditorUi.StatusPill("Neutro", DoskerEditorUi.Neutral);
+                    DoskerEditorUi.StatusPill("Warning", DoskerEditorUi.Yellow);
+                    DoskerEditorUi.StatusPill("Error", DoskerEditorUi.Red);
+                    DoskerEditorUi.StatusPill("Neutral", DoskerEditorUi.Neutral);
                 }
-                chip = DoskerEditorUi.ChipToggle(chip, "Chip", "Settings", DoskerEditorUi.Purple, "Teste de foco com Tab");
-                DoskerEditorUi.PrimaryButton("Principal", "PlayButton", DoskerEditorUi.Blue);
-                number = DoskerEditorUi.FloatWithReset("Número", number, 1f);
+                chip = DoskerEditorUi.ChipToggle(chip, "Chip", "Settings", DoskerEditorUi.Purple, "Tab focus test");
+                DoskerEditorUi.PrimaryButton("Primary", "PlayButton", DoskerEditorUi.Blue);
+                number = DoskerEditorUi.FloatWithReset("Number", number, 1f);
             }
 
-            DoskerEditorUi.Banner("Aviso com ação.", DoskerEditorUi.BannerKind.Warning, "Corrigir");
-            DoskerEditorUi.EmptyState("Nada por aqui", "Selecione um objeto para começar.");
+            DoskerEditorUi.Banner("Warning with an action.", DoskerEditorUi.BannerKind.Warning, "Fix");
+            DoskerEditorUi.EmptyState("Nothing here", "Select an object to start.");
             DoskerEditorUi.TableHeader(Columns, ref sortColumn, ref ascending);
-            DoskerEditorUi.VirtualList(500, 18f, 120f, ref listScroll, (rect, index) => GUI.Label(rect, "Linha " + index));
+            DoskerEditorUi.VirtualList(500, 18f, 120f, ref listScroll, (rect, index) => GUI.Label(rect, "Row " + index));
 
             var splitter = GUILayoutUtility.GetRect(1f, 24f, GUILayout.ExpandWidth(true));
             splitter.width = sidebar;

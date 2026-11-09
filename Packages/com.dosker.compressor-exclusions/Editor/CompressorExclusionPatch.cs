@@ -6,6 +6,7 @@ using HarmonyLib;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.Avatars.ScriptableObjects;
+using static DoskerTools.EditorUi.DoskerLocale;
 using ControlType = VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu.Control.ControlType;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
@@ -64,7 +65,7 @@ namespace CompressorExclusions {
             try {
                 Apply();
             } catch (Exception e) {
-                SolverError = $"Não foi possível aplicar o patch no VRCFury: {e.Message}";
+                SolverError = Tr($"Não foi possível aplicar o patch no VRCFury: {e.Message}", $"Could not patch VRCFury: {e.Message}");
                 Debug.LogError($"{LogPrefix} {SolverError}\n{e}");
             }
         }
@@ -74,7 +75,7 @@ namespace CompressorExclusions {
                 .Select(assembly => assembly.GetType(SolverTypeName))
                 .FirstOrDefault(type => type != null);
             if (solverType == null) {
-                throw new Exception($"Tipo {SolverTypeName} não encontrado.");
+                throw new Exception(Tr($"Tipo {SolverTypeName} não encontrado.", $"Type {SolverTypeName} not found."));
             }
 
             VrcfuryVersion = PackageInfo.FindForAssembly(solverType.Assembly)?.version ?? "?";
@@ -84,7 +85,7 @@ namespace CompressorExclusions {
                 method.Name == SolverMethodName
                 && IsParamsType(method.GetParameters().FirstOrDefault()?.ParameterType));
             if (innerMethod == null) {
-                throw new Exception($"Método {SolverMethodName}(paramz, ...) não encontrado.");
+                throw new Exception(Tr($"Método {SolverMethodName}(paramz, ...) não encontrado.", $"Method {SolverMethodName}(paramz, ...) not found."));
             }
 
             CheckSolverShape(innerMethod);
@@ -99,17 +100,17 @@ namespace CompressorExclusions {
             menuMethod = AccessTools.GetDeclaredMethods(solverType).FirstOrDefault(method =>
                 method.Name == MenuMethodName && method.GetParameters().Length == 1);
             if (menuMethod == null) {
-                ReportingError = $"Método {MenuMethodName} não encontrado: as regras por controle não funcionam.";
+                ReportingError = Tr($"Método {MenuMethodName} não encontrado: as regras por controle não funcionam.", $"Method {MenuMethodName} not found: the control rules don't work.");
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             }
 
             try {
                 var outerMethod = solverType.GetMethod(SolverMethodName, Type.EmptyTypes);
-                if (outerMethod == null) throw new Exception($"Método {SolverMethodName}() não encontrado.");
+                if (outerMethod == null) throw new Exception(Tr($"Método {SolverMethodName}() não encontrado.", $"Method {SolverMethodName}() not found."));
                 CheckResultShape(outerMethod.ReturnType);
                 harmony.Patch(outerMethod, postfix: new HarmonyMethod(Method(nameof(SolverResultPostfix))));
             } catch (Exception e) {
-                ReportingError = $"O resultado real do build não será mostrado: {e.Message}";
+                ReportingError = Tr($"O resultado real do build não será mostrado: {e.Message}", $"The actual build result won't be shown: {e.Message}");
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             }
         }
@@ -122,19 +123,19 @@ namespace CompressorExclusions {
             var names = innerMethod.GetParameters().Select(parameter => parameter.Name).ToList();
             var missing = new[] { "paramz", "addDriven", "originalCost" }.Where(name => !names.Contains(name)).ToList();
             if (missing.Count > 0) {
-                throw new Exception($"O método {SolverMethodName} não tem mais: {string.Join(", ", missing)}.");
+                throw new Exception(Tr($"O método {SolverMethodName} não tem mais: ", $"The method {SolverMethodName} no longer has: ") + string.Join(", ", missing) + ".");
             }
         }
 
         private static void CheckResultShape(Type outputType) {
             var decisionType = AccessTools.Field(outputType, "decision")?.FieldType;
-            if (decisionType == null) throw new Exception("O resultado do solver não tem mais o campo decision.");
+            if (decisionType == null) throw new Exception(Tr("O resultado do solver não tem mais o campo decision.", "The solver result no longer has the decision field."));
 
             var missing = new[] { "compress", "numberSlots", "boolSlots" }
                 .Where(name => AccessTools.Field(decisionType, name) == null)
                 .Concat(new[] { "GetBatchCount", "GetFinalCost" }.Where(name => AccessTools.Method(decisionType, name) == null))
                 .ToList();
-            if (missing.Count > 0) throw new Exception($"O resultado do solver não tem mais: {string.Join(", ", missing)}.");
+            if (missing.Count > 0) throw new Exception(Tr("O resultado do solver não tem mais: ", "The solver result no longer has: ") + string.Join(", ", missing) + ".");
         }
 
         private static bool IsParamsType(Type type) {
@@ -218,7 +219,7 @@ namespace CompressorExclusions {
                     }
                 });
             } catch (Exception e) {
-                ReportingError = $"Não foi possível ler os caminhos do menu: os padrões menu: não funcionam. {e.Message}";
+                ReportingError = Tr($"Não foi possível ler os caminhos do menu: os padrões menu: não funcionam. {e.Message}", $"Could not read the menu paths: menu: patterns don't work. {e.Message}");
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             }
             return output;
@@ -236,7 +237,7 @@ namespace CompressorExclusions {
                     }
                 }
             } catch (Exception e) {
-                ReportingError = $"Não foi possível ler o menu: as regras por controle não funcionam. {e.Message}";
+                ReportingError = Tr($"Não foi possível ler o menu: as regras por controle não funcionam. {e.Message}", $"Could not read the menu: the control rules don't work. {e.Message}");
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             }
             return output;
@@ -275,7 +276,7 @@ namespace CompressorExclusions {
                     }
                 }
             } catch (Exception e) {
-                ReportingError = $"Não foi possível gravar o retrato do build: {e.Message}";
+                ReportingError = Tr($"Não foi possível gravar o retrato do build: {e.Message}", $"Could not save the build snapshot: {e.Message}");
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             }
         }
@@ -326,7 +327,7 @@ namespace CompressorExclusions {
             } catch (Exception e) {
                 // The list is only for display, so the one from the previous build is good enough
                 snapshot.parameters = CompressorSnapshotStore.Load(snapshot.Key)?.parameters ?? snapshot.parameters;
-                ReportingError = $"Não foi possível ler os parâmetros do build: {e.Message}";
+                ReportingError = Tr($"Não foi possível ler os parâmetros do build: {e.Message}", $"Could not read the build parameters: {e.Message}");
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             }
             return snapshot;
@@ -375,7 +376,7 @@ namespace CompressorExclusions {
                 CompressorSnapshotStore.Save(snapshot, true);
                 WarnIfPlatformsDiffer(snapshot);
             } catch (Exception e) {
-                ReportingError = $"Não foi possível ler o resultado do build: {e.Message}";
+                ReportingError = Tr($"Não foi possível ler o resultado do build: {e.Message}", $"Could not read the build result: {e.Message}");
                 Debug.LogWarning($"{LogPrefix} {ReportingError}");
             } finally {
                 currentSolver = null;

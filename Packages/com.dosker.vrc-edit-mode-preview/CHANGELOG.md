@@ -3,6 +3,20 @@
 Todas as mudanças relevantes deste pacote ficam neste arquivo. O formato segue o
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.9.0] - 2026-11-09
+
+### Adicionado
+
+- Interface em inglês. O idioma é escolhido uma vez para todos os pacotes do Dosker Tools, em **Tools > Dosker Tools > Language**, em **Preferences > Dosker Tools** ou no botão com o globo. Automático segue o idioma do sistema: fora de português, a interface já abre em inglês.
+
+### Alterado
+
+- Requer `com.dosker.editor-ui` 0.8.0.
+
+### Removido
+
+- O menu de validação. Ele era só para desenvolvimento e agora fica fora do pacote.
+
 ## [0.8.2] - 2026-11-07
 
 ### Corrigido
