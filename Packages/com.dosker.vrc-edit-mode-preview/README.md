@@ -78,6 +78,14 @@ dos ossos que podem ser pegos, que continuam visíveis durante a simulação.
   avatar (`VRCAvatarDescriptor`) recebe um player ID fictício a partir de 1. Os
   property blocks são limpos ao fechar a janela, desligar a opção ou entrar no
   Play mode.
+- **VRC Raycast:** com a simulação ligada, a janela roda o próprio
+  `VRCRaycastHandler` do SDK: o raio (verde ao acertar, com a normal no ponto),
+  a *Result Transform* movida para o acerto e, no cartão, `_Hit`, `_Ratio` e
+  `_Distance` de cada raycast, com o *Behavior On Miss* aplicado. Sem simulação,
+  só o alcance aparece, pontilhado. A *Result Transform* volta ao lugar ao parar,
+  salvar, recompilar ou entrar no Play mode. No Edit mode não há jogadores, e o
+  avatar fica no layer da cena, não em *PlayerLocal*: um raio *World* pode acertar
+  colliders do próprio avatar que o cliente ignoraria.
 - **VRC Constraints:** linhas até as fontes com o peso e um “fantasma” da pose
   resolvida (Parent, Position, Rotation, Aim, LookAt), sem mover o objeto.
 

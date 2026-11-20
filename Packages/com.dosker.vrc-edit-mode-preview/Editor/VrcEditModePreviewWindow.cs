@@ -127,6 +127,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         public bool showContacts = true;
         public bool showConstraints = true;
         public bool showConstraintGhosts = true;
+        public bool showRaycasts = true;
         public bool showLabels = true;
         public bool drawThroughGeometry = true;
         public bool onlySelection;
@@ -735,6 +736,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         showContacts = saved.showContacts;
         showConstraints = saved.showConstraints;
         showConstraintGhosts = saved.showConstraintGhosts;
+        showRaycasts = saved.showRaycasts;
         showLabels = saved.showLabels;
         drawThroughGeometry = saved.drawThroughGeometry;
         onlySelection = saved.onlySelection;
@@ -759,6 +761,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
             showContacts = showContacts,
             showConstraints = showConstraints,
             showConstraintGhosts = showConstraintGhosts,
+            showRaycasts = showRaycasts,
             showLabels = showLabels,
             drawThroughGeometry = drawThroughGeometry,
             onlySelection = onlySelection,
@@ -858,6 +861,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         receiverType = FindType("VRC.Dynamics.ContactReceiver");
         constraintType = FindType("VRC.Dynamics.VRCConstraintBase");
         avatarDescriptorType = FindType("VRC.SDK3.Avatars.Components.VRCAvatarDescriptor");
+        raycastType = FindType(RaycastTypeName);
     }
 
     private static Type FindType(string fullName)
@@ -919,6 +923,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         DrawPhysBonesCard();
         DrawCollidersCard();
         DrawContactsCard();
+        DrawRaycastsCard();
         DrawConstraintsCard();
         DrawLintCard();
         DrawDisplayCard();
@@ -942,6 +947,10 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         if (simulatePhysBones && sdkFailure != null)
         {
             DoskerEditorUi.Banner(Tr("Solver do SDK indisponível, usando o aproximado: ", "SDK solver unavailable, using the approximate one: ") + sdkFailure, DoskerEditorUi.BannerKind.Warning);
+        }
+        if (simulatePhysBones && raycastFailure != null)
+        {
+            DoskerEditorUi.Banner(Tr("VRC Raycast indisponível nesta versão do SDK: ", "VRC Raycast unavailable in this SDK version: ") + raycastFailure, DoskerEditorUi.BannerKind.Warning);
         }
         if (MissingFields.Count > 0)
         {
@@ -1639,6 +1648,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         CollectComponents(physBoneType, physBones);
         CollectComponents(colliderType, colliders);
         CollectComponents(constraintType, constraints);
+        CollectComponents(raycastType, raycasts);
         var contacts = new List<Component>();
         CollectComponents(contactType, contacts);
         CountPhysBoneCost();
@@ -1660,7 +1670,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
 
         if (simulatePhysBones)
         {
-            if (!simulatedBones.SetEquals(physBones))
+            if (!simulatedBones.SetEquals(physBones) || !simulatedRaycasts.SetEquals(raycasts))
             {
                 RestartSimulation();
             }
@@ -2489,6 +2499,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         if (enabled)
         {
             sdkFailure = null;
+            raycastFailure = null;
             RestartSimulation();
         }
         else
@@ -2517,6 +2528,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
             StepSdkSolver();
             return;
         }
+        TickRaycasts();
         foreach (var chain in chains.Where(chain => !chain.FollowsLink))
         {
             StepChain(chain);
@@ -3403,6 +3415,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         simulationAccumulator = 0f;
         lastSimulationTime = EditorApplication.timeSinceStartup;
         StartSdkSolver();
+        StartRaycasts();
     }
 
     private void StartSdkSolver()
@@ -3427,6 +3440,8 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         sdkGrab = null;
         sdkSolver?.Stop();
         sdkSolver = null;
+        // Os raycasts param e voltam junto: todos os caminhos que param o solver também passam por aqui.
+        StopRaycasts();
         // Constraints da Unity no avatar só voltam à pose de repouso quando o player loop roda de novo.
         EditorApplication.QueuePlayerLoopUpdate();
     }
@@ -3441,7 +3456,11 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
                 sdkSolver.ApplyConfiguration(component);
             }
             pendingConfiguration.Clear();
-            sdkSolver.Tick(ReapplyAnimatedChains);
+            sdkSolver.Tick(() =>
+            {
+                ReapplyAnimatedChains();
+                TickRaycasts();
+            });
         }
         catch (Exception exception)
         {
@@ -3538,6 +3557,7 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
     private void RestoreAllChains()
     {
         sdkSolver?.CompleteJob();
+        raycastRunner?.RestoreResults();
         foreach (var saved in sdkRestPose.Where(saved => saved.Transform != null))
         {
             saved.Transform.localPosition = saved.LocalPosition;
@@ -4176,6 +4196,11 @@ public sealed partial class VrcEditModePreviewWindow : EditorWindow
         else
         {
             touching = false;
+        }
+
+        if (showRaycasts && drawGizmos)
+        {
+            DrawRaycasts();
         }
 
         if (showConstraints && drawGizmos)

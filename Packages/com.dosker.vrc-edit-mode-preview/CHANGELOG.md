@@ -3,6 +3,12 @@
 Todas as mudanças relevantes deste pacote ficam neste arquivo. O formato segue o
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.11.0] - 2026-11-20
+
+### Adicionado
+
+- **VRC Raycast** no Edit mode: com a simulação ligada, a janela roda o `VRCRaycastHandler` do próprio SDK, move a *Result Transform* para o acerto e mostra `_Hit`, `_Ratio` e `_Distance` num cartão novo, com o raio e o ponto de acerto na Scene View. A *Result Transform* volta ao lugar ao parar, salvar, recompilar ou entrar no Play mode.
+
 ## [0.10.0] - 2026-11-09
 
 ### Adicionado
