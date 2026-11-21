@@ -1,9 +1,9 @@
 {
-  "name": "com.dosker.animation-audio-waveform",
-  "displayName": "Dosker Tools - Animation Audio Waveform",
-  "version": "0.8.0",
+  "name": "com.dosker.authoring-tools",
+  "displayName": "Dosker Tools - Authoring Tools",
+  "version": "0.9.0",
   "unity": "2022.3",
-  "description": "Mostra o áudio dentro da janela Animation para sincronizar animações com som.",
+  "description": "Ferramentas para editar conteúdo do VRChat no Unity: prévia do menu de expressões no Inspector, fiel ao jogo, e o áudio dentro da janela Animation para sincronizar animações com som.",
   "author": {
     "name": "Dosker",
     "email": "6579456+sdosker@users.noreply.github.com",
@@ -16,5 +16,8 @@
   },
   "legacyFiles": {
     "Assets\\Editor\\AnimationAudioWaveformWindow.cs": ""
-  }
+  },
+  "legacyPackages": [
+    "com.dosker.animation-audio-waveform"
+  ]
 }

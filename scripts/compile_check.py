@@ -53,6 +53,25 @@ def find_asmdefs():
     return asmdefs
 
 
+def assembly_sources(folder):
+    """The .cs files that belong to the asmdef in folder: a subfolder with its own asmdef is another assembly."""
+    sources = []
+    for source in sorted(folder.rglob("*.cs")):
+        directory = source.parent
+        while directory != folder and not any(directory.glob("*.asmdef")):
+            directory = directory.parent
+        if directory == folder:
+            sources.append(source)
+    return sources
+
+
+def tests_folder(asmdef_folder):
+    """tests/Unity/<package>/ for the asmdef in Editor/, tests/Unity/<package>/<subfolder>/ for one in Editor/<subfolder>/."""
+    relative = asmdef_folder.relative_to(PACKAGES_DIR)
+    package, inner = relative.parts[0], Path(*relative.parts[2:]) if len(relative.parts) > 2 else Path(".")
+    return TESTS_DIR / package / inner
+
+
 def compile_order(asmdefs):
     done = []
 
@@ -70,10 +89,10 @@ def compile_order(asmdefs):
 
 def compile_assembly(name, asmdefs, defines, references, unity, output_dir, with_tests=False):
     path, data = asmdefs[name]
-    sources = sorted(path.parent.rglob("*.cs"))
+    sources = assembly_sources(path.parent)
     if with_tests:
         # The validation sources compile in the package's own assembly, as sync_to_project.py --tests places them
-        sources += sorted((TESTS_DIR / path.parent.parent.name).glob("*.cs"))
+        sources += sorted(tests_folder(path.parent).glob("*.cs"))
     output = output_dir / f"{name}.dll"
     local = [output_dir / f"{reference}.dll" for reference in data.get("references", []) if reference in asmdefs]
     # Names that this repository also builds must come from this run, not from the project

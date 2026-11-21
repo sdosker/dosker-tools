@@ -9,7 +9,7 @@ body:
       options:
         - ShaderView
         - VRChat Edit-Mode Preview
-        - Animation Audio Waveform
+        - Authoring Tools
         - Compressor Exclusions
         - Performance Budget
         - Editor UI

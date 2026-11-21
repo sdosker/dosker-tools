@@ -56,11 +56,18 @@ def with_retries(action, *args):
 
 def validation_files(package):
     """The validation sources for a package, as {path in the package: source}. They live outside Packages/ so
-    they never reach a zip, and compile next to the package code to reach its private members."""
+    they never reach a zip, and compile next to the package code to reach its private members. Files in
+    tests/Unity/<package>/<subfolder>/ go to Editor/<subfolder>/Validation, next to the asmdef of that subfolder."""
     folder = TESTS_DIR / package
     if not folder.is_dir():
         return {}
-    return {VALIDATION_FOLDER / path.name: path for path in sorted(folder.glob("*.cs"))}
+    files = {}
+    for path in sorted(folder.rglob("*.cs")):
+        inner = path.parent.relative_to(folder)
+        destination = Path("Editor") / inner / "Validation"
+        files[destination] = path.parent
+        files[destination / path.name] = path
+    return files
 
 
 def push(project_packages, package, with_tests=False):
@@ -68,10 +75,7 @@ def push(project_packages, package, with_tests=False):
     target = project_packages / package
     files = {path.relative_to(source): path for path in source.rglob("*") if path.name not in EXCLUDED_NAMES}
     if with_tests:
-        tests = validation_files(package)
-        if tests:
-            files[VALIDATION_FOLDER] = TESTS_DIR / package
-            files.update(tests)
+        files.update(validation_files(package))
     wanted = set(files)
 
     for relative in sorted(wanted):
@@ -101,7 +105,7 @@ def pull(project_packages, package):
     for meta in source.rglob("*.meta"):
         relative = meta.relative_to(source)
         target = PACKAGES_DIR / package / relative
-        if meta.name in EXCLUDED_NAMES or target.exists() or relative.with_suffix("") == VALIDATION_FOLDER or relative.parts[:2] == VALIDATION_FOLDER.parts:
+        if meta.name in EXCLUDED_NAMES or target.exists() or VALIDATION_FOLDER.name in relative.with_suffix("").parts:
             continue
         # A .meta only belongs here if its asset does too
         if not target.with_suffix("").exists():

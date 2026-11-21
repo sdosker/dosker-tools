@@ -117,7 +117,12 @@ def build_page(listing, repo):
         dep for name, manifest in latest.items() if name != META_PACKAGE
         for dep in manifest.get("vpmDependencies", {})
     }
-    names = sorted(latest, key=lambda name: (name in required, latest[name]["displayName"]))
+    # A renamed package stays in index.json so old projects still resolve, but the page only shows its successor
+    replaced = {old for manifest in latest.values() for old in manifest.get("legacyPackages", [])}
+    names = sorted(
+        (name for name in latest if name not in replaced),
+        key=lambda name: (name in required, latest[name]["displayName"]),
+    )
     cards = "\n".join(render_package(name, listing["packages"][name], required, repo) for name in names)
 
     add_url = "vcc://vpm/addRepo?url=" + urllib.parse.quote(listing["url"], safe="")

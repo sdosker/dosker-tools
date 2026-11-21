@@ -37,7 +37,7 @@ Dosker window. The choice applies to every installed Dosker package at once.
 |---|---|---|
 | ShaderView | Debugs shaders by simulating VRChat cameras and contexts | MIT |
 | VRChat Edit-Mode Preview | Shows PhysBones, Contacts, Constraints and Animator animations outside Play mode | MIT |
-| Animation Audio Waveform | Shows audio inside the Animation window | MIT |
+| Authoring Tools | Expressions menu preview in the Inspector, faithful to VRChat, and audio inside the Animation window | MIT |
 | Compressor Exclusions | Chooses which parameters VRCFury's compressor may compress and predicts the build result | Non-commercial |
 | Performance Budget | Predicts the avatar's rank, taking into account what VRCFury changes during the build | MIT |
 | Editor UI | Shared interface, installed as a dependency | MIT |

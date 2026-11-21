@@ -11,6 +11,8 @@ import build_listing  # noqa: E402
 import build_packages  # noqa: E402
 import bump  # noqa: E402
 import check_vrcfury  # noqa: E402
+import compile_check  # noqa: E402
+import sync_to_project  # noqa: E402
 
 
 def package_dir(root, changelog, source=""):
@@ -87,6 +89,52 @@ class Bump(unittest.TestCase):
 class Listing(unittest.TestCase):
     def test_newest_version_is_numeric(self):
         self.assertEqual(max(["1.9.0", "1.10.0"], key=build_listing.version_key), "1.10.0")
+
+    def test_page_hides_replaced_packages_but_listing_keeps_them(self):
+        def manifest(name, display, **extra):
+            return {"name": name, "displayName": display, "version": "1.0.0", "url": f"https://x/{name}.zip", **extra}
+
+        listing = build_listing.build_listing([
+            manifest("com.dosker.old", "Dosker Tools - Old"),
+            manifest("com.dosker.new", "Dosker Tools - New", legacyPackages=["com.dosker.old"]),
+        ], "https://x/index.json")
+        page = build_listing.build_page(listing, "owner/repo")
+        self.assertIn("com.dosker.old", listing["packages"])
+        self.assertIn("<code class=\"pkg-id\">com.dosker.new</code>", page)
+        self.assertNotIn("<code class=\"pkg-id\">com.dosker.old</code>", page)
+
+
+class NestedAssemblies(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.packages = Path(self.temp.name) / "Packages"
+        self.tests = Path(self.temp.name) / "tests"
+        editor = self.packages / "com.dosker.test" / "Editor"
+        for path in [editor / "A.asmdef", editor / "Window.cs", editor / "Helpers" / "Util.cs", editor / "Menu" / "B.asmdef", editor / "Menu" / "View.cs"]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        for path in [self.tests / "com.dosker.test" / "OuterValidation.cs", self.tests / "com.dosker.test" / "Menu" / "MenuValidation.cs"]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        self.editor = editor
+
+    def test_subfolder_with_asmdef_is_another_assembly(self):
+        names = [path.name for path in compile_check.assembly_sources(self.editor)]
+        self.assertEqual(names, ["Util.cs", "Window.cs"])
+        self.assertEqual([path.name for path in compile_check.assembly_sources(self.editor / "Menu")], ["View.cs"])
+
+    def test_tests_follow_the_asmdef_folder(self):
+        with mock.patch.object(compile_check, "PACKAGES_DIR", self.packages), mock.patch.object(compile_check, "TESTS_DIR", self.tests):
+            self.assertEqual(compile_check.tests_folder(self.editor), self.tests / "com.dosker.test")
+            self.assertEqual(compile_check.tests_folder(self.editor / "Menu"), self.tests / "com.dosker.test" / "Menu")
+
+    def test_validation_goes_next_to_its_asmdef(self):
+        with mock.patch.object(sync_to_project, "TESTS_DIR", self.tests):
+            files = sync_to_project.validation_files("com.dosker.test")
+        self.assertIn(Path("Editor/Validation/OuterValidation.cs"), files)
+        self.assertIn(Path("Editor/Menu/Validation/MenuValidation.cs"), files)
+        self.assertIn(Path("Editor/Menu/Validation"), files)
 
 
 class VrcfuryWatch(unittest.TestCase):

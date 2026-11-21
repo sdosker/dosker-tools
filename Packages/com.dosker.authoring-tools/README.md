@@ -1,4 +1,46 @@
-# Animation Audio Waveform
+# Authoring Tools
+
+Ferramentas que ajudam a editar conteúdo do VRChat no Unity. Este pacote substitui o
+`com.dosker.animation-audio-waveform`: ao instalá-lo, o VCC remove o antigo, e as preferências continuam as mesmas.
+
+## Expressions Menu Preview
+
+Mostra o menu radial do VRChat no Inspector de um `VRCExpressionsMenu`, abaixo dos campos do SDK. O editor do
+SDK continua o mesmo: a prévia só é acrescentada no fim, numa seção **Prévia no VRChat** que pode ser recolhida.
+
+- **Visual do Action Menu:** Back no topo e os controles no sentido horário, ícone com o nome embaixo e o
+  marcador do tipo (toggle, submenu, radial, dois e quatro eixos). Toggles e botões ligados mostram o anel
+  girando, e os radial puppets mostram a porcentagem. Só os 8 primeiros controles aparecem, como no jogo.
+- **Texto como no VRChat:** os nomes passam pelas regras de rich text do TextMeshPro, que o VRChat usa.
+  Funcionam `<color>` (nomes e `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`), `<#FF0000>`, `<alpha>`, `<size>`
+  (absoluto, `+`/`-`, `%` e `em`), `<b>`, `<i>`, `<u>`, `<s>`, `<mark>`, `<sup>`, `<sub>`, `<br>`, `
+`,
+  `<uppercase>`, `<lowercase>`, `<smallcaps>`, `<cspace>`, `<mspace>`, `<voffset>`, `<line-height>`,
+  `<align>`, `<nobr>`, `<noparse>`, `<scale>` e `<rotate>`. Como no TMP, o nome da tag só vale todo em
+  minúsculas ou todo em maiúsculas, e os nomes de cor só em minúsculas: `<Color=red>` e `<color=Red>`
+  aparecem como texto. O texto quebra nos espaços, com tamanho base 24 numa caixa de 200 unidades, num menu
+  de 600 de diâmetro.
+- **Formatação sem decorar tags:** embaixo do campo **Name** do controle, e dos rótulos dos puppets, há uma
+  barra com **B**, **I**, **U**, **S**, uma cor com **Colorir**, um tamanho com **Tamanho** e **Limpar**.
+  Selecione um trecho do nome e clique; sem seleção, vale para o nome todo. **Limpar** tira as tags que o
+  VRChat reconhece e mantém o resto.
+- **Tempo real:** a prévia muda enquanto o nome é digitado, e também com Undo ou com mudanças feitas em
+  outra janela, sem precisar clicar em nada.
+- **Interativo:** clique para ligar toggles, apertar botões (voltam a zero depois de cerca de um segundo),
+  entrar em submenus e abrir puppets. Arraste para mexer no puppet; o botão direito volta. Um submenu que
+  define um parâmetro o zera ao sair, e mudar esse parâmetro fecha o submenu, como diz a documentação do
+  VRChat. Os valores iniciais vêm do `VRCExpressionParameters` do avatar da cena que usa o menu.
+- **Janela:** **Tools > Dosker Tools > Expressions Menu Preview**, ou o botão **Janela** da prévia, abre o
+  menu numa janela maior que segue a seleção, seja um menu ou um avatar, com os parâmetros editáveis ao lado.
+- **Limites:** a fonte é a Arial, que tem as mesmas medidas da LiberationSans, a fonte padrão do TMP. O
+  formato das letras pode variar um pouco em relação ao jogo, mas as quebras de linha e os tamanhos não.
+  `<sprite>` vira um marcador, e `<font>`, `<material>`, `<gradient>` e `<style>` aparecem como texto,
+  porque dependem de assets do cliente. As cores e medidas do menu seguem o Action Menu padrão; o
+  tamanho e a opacidade que cada jogador escolhe nas opções do VRChat não entram.
+- **Requisitos:** só aparece em projetos com `com.vrchat.avatars`. Em projetos de mundo, o resto do pacote
+  continua funcionando.
+
+## Animation Audio Waveform
 
 Mostra o áudio dentro da janela **Animation**, abaixo da dopesheet/curvas, para
 sincronizar animações com som. **Tools > Dosker Tools > Animation Audio Waveform**

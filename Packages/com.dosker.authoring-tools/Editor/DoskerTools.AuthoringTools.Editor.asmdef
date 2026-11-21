@@ -1,5 +1,5 @@
 {
-    "name": "DoskerTools.AnimationAudioWaveform.Editor",
+    "name": "DoskerTools.AuthoringTools.Editor",
     "rootNamespace": "",
     "references": [
         "DoskerTools.EditorUi"
